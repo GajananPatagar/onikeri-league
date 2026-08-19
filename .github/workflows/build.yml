@@ -1,0 +1,40 @@
+name: Build APK Fast
+
+on:
+  workflow_dispatch: # Allows you to manually trigger the build
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # Uses GitHub's powerful Linux servers
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java (Required for Android)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Expo & EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build APK (Bypasses Expo Queue)
+        run: EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform android --profile preview --local --non-interactive --output ./onikeri-app.apk
+
+      - name: Upload APK for Download
+        uses: actions/upload-artifact@v4
+        with:
+          name: Onikeri-Premier-League-APK
+          path: ./onikeri-app.apk
