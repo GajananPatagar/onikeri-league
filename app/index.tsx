@@ -224,12 +224,12 @@ export default function MasterApp() {
     }
   };
 
-  const pickImage = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({
+   const pickImage = async () => {
+    let res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.25, // Optimized to prevent device buffer memory leaks
+      quality: 0.15, // Massively shrinks the file size to prevent lag
     });
     if (!res.canceled) {
       setProfileImage(res.assets[0].uri);
