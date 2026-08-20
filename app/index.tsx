@@ -29,6 +29,7 @@ import {
   getAuth,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   sendEmailVerification,
   signOut,
 } from 'firebase/auth';
@@ -200,10 +201,24 @@ export default function MasterApp() {
     } catch (err: any) {
       setIsProcessing(false);
       if (err.code === 'auth/email-already-in-use') {
-        Alert.alert('Registered User', 'This email is already active. Please switch to Login.');
+        Alert.alert(
+          'Account Exists', 
+          'This email is already registered. Switching to login so you can complete your Face Verification.',
+          [{ text: 'OK', onPress: () => setAuthMode('LOGIN') }]
+        );
       } else {
         Alert.alert('Registration Failed', err.message);
       }
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email.trim()) return Alert.alert('Email Required', 'Please enter your registered email address above first, then tap Forgot Password.');
+    try {
+      await sendPasswordResetEmail(auth, email.toLowerCase().trim());
+      Alert.alert('Reset Link Sent 📩', `A password reset link has been sent to ${email}. Check your inbox.`);
+    } catch (err: any) {
+      Alert.alert('Error', err.message);
     }
   };
 
@@ -224,19 +239,19 @@ export default function MasterApp() {
     }
   };
 
-   const pickImage = async () => {
+  const pickImage = async () => {
     let res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.15, // Massively shrinks the file size to prevent lag
+      quality: 0.15,
     });
     if (!res.canceled) {
       setProfileImage(res.assets[0].uri);
     }
   };
 
-    const executeFaceVerification = async () => {
+  const executeFaceVerification = async () => {
     if (!profileImage) return Alert.alert('Photo Missing', 'Upload a clear profile photo.');
     setIsProcessing(true);
 
@@ -259,7 +274,6 @@ export default function MasterApp() {
       const user = auth.currentUser;
       if (!user) throw new Error('Active session expired.');
 
-      // Convert image directly to Base64 string (Bypasses Firebase Storage entirely for 100% free usage)
       const response = await fetch(profileImage);
       const blob = await response.blob();
       const reader = new FileReader();
@@ -270,14 +284,13 @@ export default function MasterApp() {
         reader.readAsDataURL(blob);
       });
 
-      // Save user details and Base64 avatar directly to Firestore database
       await setDoc(doc(db, 'users', user.uid), {
         fullName,
         mobileNumber,
         email: email.toLowerCase().trim(),
         dob,
         role: 'Player',
-        photoURL: base64data, // Stored safely as local text string
+        photoURL: base64data,
         walletBalance: 100,
         registeredAt: new Date().toISOString(),
       });
@@ -295,7 +308,6 @@ export default function MasterApp() {
   };
 
   const handleLogin = async () => {
-    // Hidden Master Administrator Access
     if (email.trim() === 'admin@onikeri.com' && password === '@1681Gaju') {
       setFullName('Gajanan (SuperAdmin)');
       setIsAdmin(true);
@@ -326,12 +338,16 @@ export default function MasterApp() {
         setMobileNumber(data.mobileNumber || '');
         setProfileImage(data.photoURL || null);
         setIsAdmin(data.role === 'SuperAdmin');
+        
+        setIsProcessing(false);
+        setIsGuest(false);
+        setStep('DASHBOARD');
+        setActiveTab('Home');
+      } else {
+        setIsProcessing(false);
+        setStep('FACE_SCAN');
+        Alert.alert('Complete Setup', 'Your email is verified, but Face Verification is pending. Please complete your scan.');
       }
-
-      setIsProcessing(false);
-      setIsGuest(false);
-      setStep('DASHBOARD');
-      setActiveTab('Home');
     } catch (err: any) {
       setIsProcessing(false);
       Alert.alert('Authentication Failed', 'Invalid email or password.');
@@ -396,7 +412,6 @@ export default function MasterApp() {
       <SafeAreaView style={styles.authSafeContainer}>
         <StatusBar barStyle="light-content" backgroundColor="#090D16" />
         <ScrollView contentContainerStyle={styles.authScroll} showsVerticalScrollIndicator={false}>
-          {/* Brand Header */}
           <View style={styles.authHeaderBox}>
             <View style={styles.brandIconBubble}>
               <MaterialCommunityIcons name="cricket" size={32} color="#38BDF8" />
@@ -406,7 +421,6 @@ export default function MasterApp() {
             <Text style={styles.authSubTitle}>Karnataka's premier automated sports & turf management platform.</Text>
           </View>
 
-          {/* Mode Switcher Tabs */}
           <View style={styles.authSegmentContainer}>
             <TouchableOpacity
               style={[styles.authSegmentBtn, authMode === 'REGISTER' && styles.authSegmentBtnActive]}
@@ -422,7 +436,6 @@ export default function MasterApp() {
             </TouchableOpacity>
           </View>
 
-          {/* Form Card */}
           <View style={styles.glassCard}>
             {authMode === 'REGISTER' ? (
               <>
@@ -542,6 +555,11 @@ export default function MasterApp() {
                   onChangeText={setPassword}
                 />
 
+                {/* Forgot Password Link */}
+                <TouchableOpacity style={{ alignSelf: 'flex-end', marginTop: 8 }} onPress={handleForgotPassword}>
+                  <Text style={{ color: '#38BDF8', fontSize: 12, fontWeight: '700' }}>Forgot Password?</Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity style={styles.mainActionBtn} onPress={handleLogin} disabled={isProcessing}>
                   {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Sign In</Text>}
                 </TouchableOpacity>
@@ -633,7 +651,6 @@ export default function MasterApp() {
     <SafeAreaView style={styles.dashboardContainer}>
       <StatusBar barStyle="light-content" backgroundColor="#090D16" />
 
-      {/* Top Application Header */}
       <View style={styles.topHeader}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <TouchableOpacity onPress={() => setActiveTab('Profile')}>
@@ -668,7 +685,6 @@ export default function MasterApp() {
         </View>
       </View>
 
-      {/* Main Tab Views */}
       <ScrollView
         contentContainerStyle={styles.dashboardScroll}
         showsVerticalScrollIndicator={false}
@@ -676,7 +692,6 @@ export default function MasterApp() {
       >
         {activeTab === 'Home' && (
           <>
-            {/* Wallet Balance Card */}
             <View style={styles.walletHeroCard}>
               <View>
                 <Text style={styles.walletHeaderLabel}>Available Balance</Text>
@@ -689,7 +704,6 @@ export default function MasterApp() {
               </TouchableOpacity>
             </View>
 
-            {/* Live Match Spotlight Card */}
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionHeading}>Live Match Arena</Text>
               <View style={styles.pulsingLivePill}>
@@ -721,7 +735,6 @@ export default function MasterApp() {
               </View>
             </View>
 
-            {/* Join Team Squad Box */}
             <View style={styles.joinTeamBox}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
                 <FontAwesome5 name="users" size={16} color="#38BDF8" />
@@ -744,7 +757,6 @@ export default function MasterApp() {
               </View>
             </View>
 
-            {/* Quick Turf Booking Grid */}
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionHeading}>Instant Slot Booking</Text>
               <TouchableOpacity onPress={() => setActiveTab('Turfs')}>
@@ -847,7 +859,6 @@ export default function MasterApp() {
 
         {activeTab === 'Profile' && (
           <View style={styles.profileContainer}>
-            {/* Player Identity Banner */}
             <View style={styles.profileBanner}>
               {profileImage && !isGuest ? (
                 <Image source={{ uri: profileImage }} style={styles.profileMasterAvatar} />
@@ -860,7 +871,6 @@ export default function MasterApp() {
               <Text style={styles.profileRoleDisplay}>{isAdmin ? 'Super Administrator' : isGuest ? 'Guest User' : 'Verified League Player'}</Text>
             </View>
 
-            {/* Performance Matrix */}
             <View style={styles.statsCardGrid}>
               <View style={styles.statBox}>
                 <Text style={styles.statVal}>{userStats.matches}</Text>
@@ -880,7 +890,6 @@ export default function MasterApp() {
               </View>
             </View>
 
-            {/* Quick Settings */}
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => Alert.alert('Security', 'Biometric & Firebase Token active.')}
@@ -906,7 +915,6 @@ export default function MasterApp() {
         )}
       </ScrollView>
 
-      {/* Persistent Bottom Tab Navigation Bar */}
       <View style={styles.bottomNavContainer}>
         {(
           [
@@ -926,7 +934,6 @@ export default function MasterApp() {
         })}
       </View>
 
-      {/* --- MODAL: RAZORPAY DEPOSIT --- */}
       <Modal visible={modalType === 'RAZORPAY'} transparent animationType="slide">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
@@ -948,7 +955,6 @@ export default function MasterApp() {
         </View>
       </Modal>
 
-      {/* --- MODAL: SUPER ADMIN MATRIX --- */}
       <Modal visible={modalType === 'ADMIN_MATRIX'} transparent animationType="slide">
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalSheet, { maxHeight: '80%' }]}>
@@ -985,7 +991,6 @@ export default function MasterApp() {
         </View>
       </Modal>
 
-      {/* --- MODAL: SCORECARD BROADCASTER --- */}
       <Modal visible={modalType === 'UPDATE_SCORE'} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
@@ -1024,7 +1029,6 @@ export default function MasterApp() {
         </View>
       </Modal>
 
-      {/* --- MODAL: CREATE TOURNAMENT --- */}
       <Modal visible={modalType === 'CREATE_TOURNAMENT'} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
@@ -1077,7 +1081,6 @@ export default function MasterApp() {
         </View>
       </Modal>
 
-      {/* --- MODAL: NOTIFICATIONS --- */}
       <Modal visible={modalType === 'NOTIFICATIONS'} transparent animationType="slide">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
@@ -1101,9 +1104,7 @@ export default function MasterApp() {
   );
 }
 
-// --- MASTER APPLICATION STYLES ---
 const styles = StyleSheet.create({
-  // Auth Layout
   authSafeContainer: { flex: 1, backgroundColor: '#090D16' },
   authScroll: { paddingHorizontal: 22, paddingVertical: 25 },
   authHeaderBox: { alignItems: 'center', marginBottom: 20 },
@@ -1175,8 +1176,6 @@ const styles = StyleSheet.create({
   mainActionBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   guestLinkBox: { marginTop: 16, alignItems: 'center' },
   guestLinkText: { color: '#64748B', fontWeight: '600', fontSize: 13 },
-
-  // Verification & Face AI
   verificationCard: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 },
   verificationIconBubble: {
     width: 90,
@@ -1202,8 +1201,6 @@ const styles = StyleSheet.create({
     marginVertical: 20,
   },
   avatarPreviewImage: { width: '100%', height: '100%' },
-
-  // Dashboard Structure
   dashboardContainer: { flex: 1, backgroundColor: '#090D16' },
   topHeader: {
     flexDirection: 'row',
@@ -1252,8 +1249,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#38BDF8',
   },
   dashboardScroll: { paddingHorizontal: 18, paddingVertical: 20, paddingBottom: 110 },
-
-  // Dashboard Modules
   walletHeroCard: {
     backgroundColor: '#0284C7',
     borderRadius: 18,
@@ -1296,8 +1291,6 @@ const styles = StyleSheet.create({
   },
   pulsingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#EF4444' },
   livePillText: { color: '#EF4444', fontSize: 10, fontWeight: '800' },
-
-  // Match Arena
   matchCard: {
     backgroundColor: '#131C2E',
     borderRadius: 16,
@@ -1322,8 +1315,6 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   matchFooterText: { color: '#F59E0B', fontSize: 12, fontWeight: '600' },
-
-  // Join Team Box
   joinTeamBox: {
     backgroundColor: '#131C2E',
     borderRadius: 16,
@@ -1353,8 +1344,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   joinTeamActionText: { color: '#FFFFFF', fontWeight: '700', fontSize: 13 },
-
-  // Slots Grid
   quickSlotRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
   quickSlotCard: {
     flex: 1,
@@ -1369,8 +1358,6 @@ const styles = StyleSheet.create({
   slotTime: { color: '#F8FAFC', fontSize: 11, fontWeight: '700' },
   slotPrice: { color: '#38BDF8', fontSize: 13, fontWeight: '800', marginVertical: 4 },
   slotPill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-
-  // Tournaments & Turfs Tab Specifics
   tourneyCard: {
     backgroundColor: '#131C2E',
     borderRadius: 14,
@@ -1408,8 +1395,6 @@ const styles = StyleSheet.create({
   slotFullPrice: { color: '#38BDF8', fontSize: 13, fontWeight: '800', marginTop: 2 },
   slotFullBtn: { backgroundColor: '#0284C7', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 },
   slotFullBtnText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
-
-  // Profile View
   profileContainer: { alignItems: 'center' },
   profileBanner: { alignItems: 'center', marginVertical: 15 },
   profileMasterAvatar: { width: 90, height: 90, borderRadius: 45, borderWidth: 3, borderColor: '#38BDF8' },
@@ -1450,8 +1435,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   menuItemText: { color: '#F8FAFC', fontSize: 13, fontWeight: '700', flex: 1, marginLeft: 12 },
-
-  // Bottom Navigation Bar
   bottomNavContainer: {
     position: 'absolute',
     bottom: 0,
@@ -1469,8 +1452,6 @@ const styles = StyleSheet.create({
   bottomTabBtn: { alignItems: 'center' },
   bottomTabText: { color: '#64748B', fontSize: 10, marginTop: 4, fontWeight: '600' },
   bottomTabTextActive: { color: '#38BDF8', fontWeight: '800' },
-
-  // Modals & Bottom Sheets
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.75)', justifyContent: 'flex-end' },
   modalSheet: {
     backgroundColor: '#131C2E',
