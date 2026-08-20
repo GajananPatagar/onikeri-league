@@ -236,7 +236,7 @@ export default function MasterApp() {
     }
   };
 
-  const executeFaceVerification = async () => {
+    const executeFaceVerification = async () => {
     if (!profileImage) return Alert.alert('Photo Missing', 'Upload a clear profile photo.');
     setIsProcessing(true);
 
@@ -259,19 +259,25 @@ export default function MasterApp() {
       const user = auth.currentUser;
       if (!user) throw new Error('Active session expired.');
 
+      // Convert image directly to Base64 string (Bypasses Firebase Storage entirely for 100% free usage)
       const response = await fetch(profileImage);
       const blob = await response.blob();
-      const storageReference = ref(storage, `player_avatars/${user.uid}.jpg`);
-      await uploadBytes(storageReference, blob);
-      const photoURL = await getDownloadURL(storageReference);
+      const reader = new FileReader();
+      
+      const base64data: string = await new Promise((resolve, reject) => {
+        reader.onerror = reject;
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
 
+      // Save user details and Base64 avatar directly to Firestore database
       await setDoc(doc(db, 'users', user.uid), {
         fullName,
         mobileNumber,
         email: email.toLowerCase().trim(),
         dob,
         role: 'Player',
-        photoURL,
+        photoURL: base64data, // Stored safely as local text string
         walletBalance: 100,
         registeredAt: new Date().toISOString(),
       });
