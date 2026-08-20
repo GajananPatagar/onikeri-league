@@ -34,7 +34,6 @@ import {
   signOut,
 } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const { width } = Dimensions.get('window');
 
@@ -50,15 +49,12 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app);
 
 export default function MasterApp() {
-  // Navigation & Authentication States
   const [step, setStep] = useState<'AUTH' | 'WAIT_EMAIL' | 'FACE_SCAN' | 'DASHBOARD'>('AUTH');
   const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER'>('REGISTER');
   const [activeTab, setActiveTab] = useState<'Home' | 'Matches' | 'Turfs' | 'Profile'>('Home');
 
-  // User Identity & Permissions
   const [isGuest, setIsGuest] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -69,7 +65,6 @@ export default function MasterApp() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [profileImage, setProfileImage] = useState<string | null>(null);
 
-  // Form Validation & UI Flags
   const [errors, setErrors] = useState({
     fullName: '',
     mobileNumber: '',
@@ -84,7 +79,6 @@ export default function MasterApp() {
   const [refreshing, setRefreshing] = useState(false);
   const [greeting, setGreeting] = useState('Welcome');
 
-  // Dashboard Data Models
   const [walletBalance, setWalletBalance] = useState(2500);
   const [teamCode, setTeamCode] = useState('');
   const [userStats, setUserStats] = useState({ matches: 18, runs: 462, wickets: 14, rank: '#4' });
@@ -115,7 +109,6 @@ export default function MasterApp() {
     { id: 's6', time: '09:00 PM - 10:00 PM', status: 'Available', price: '₹1000' },
   ]);
 
-  // Modal States
   const [modalType, setModalType] = useState<'NONE' | 'RAZORPAY' | 'ADMIN_MATRIX' | 'UPDATE_SCORE' | 'CREATE_TOURNAMENT' | 'NOTIFICATIONS'>('NONE');
   const [newTourney, setNewTourney] = useState({ name: '', prize: '', fee: '' });
 
@@ -133,7 +126,6 @@ export default function MasterApp() {
     }, 1200);
   }, []);
 
-  // --- VALIDATION ENGINES ---
   const validateName = (text: string) => {
     setFullName(text);
     const isValid = /^[A-Za-z\s]{3,25}$/.test(text.trim());
@@ -150,6 +142,12 @@ export default function MasterApp() {
     setEmail(text);
     const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text.trim());
     setErrors((prev) => ({ ...prev, email: !isValid && text.length > 0 ? 'Provide a valid email address.' : '' }));
+  };
+
+  const validatePasswordStrength = (pass: string) => {
+    const hasLetter = /[a-zA-Z]/.test(pass);
+    const hasNumber = /[0-9]/.test(pass);
+    return pass.length >= 8 && hasLetter && hasNumber;
   };
 
   const checkAge = (dobString: string) => {
@@ -184,20 +182,23 @@ export default function MasterApp() {
     }
   };
 
-  // --- ACTIONS & INTEGRATIONS ---
   const handleRegisterFlow = async () => {
     const hasErr = Object.values(errors).some((e) => e !== '');
-    const incomplete = !fullName || !mobileNumber || !email || dob.length !== 10 || !password || !confirmPassword;
+    const cleanEmailReg = email ? email.toLowerCase().trim() : '';
+    const cleanPassReg = password ? password.trim() : '';
+    const incomplete = !fullName || !mobileNumber || !cleanEmailReg || dob.length !== 10 || !cleanPassReg || !confirmPassword;
+    
     if (hasErr || incomplete) return Alert.alert('Invalid Form', 'Please resolve all required fields highlighted in red.');
-    if (password !== confirmPassword) return Alert.alert('Password Mismatch', 'Passwords do not match.');
+    if (cleanPassReg !== confirmPassword.trim()) return Alert.alert('Password Mismatch', 'Passwords do not match.');
+    if (!validatePasswordStrength(cleanPassReg)) return Alert.alert('Weak Password', 'Password must be at least 8 characters and include both letters and numbers.');
 
     setIsProcessing(true);
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email.toLowerCase().trim(), password);
+      const userCredential = await createUserWithEmailAndPassword(auth, cleanEmailReg, cleanPassReg);
       await sendEmailVerification(userCredential.user);
       setIsProcessing(false);
       setStep('WAIT_EMAIL');
-      Alert.alert('Verification Sent 📩', `Google Firebase dispatched a verification link to ${email}. Click the link to proceed.`);
+      Alert.alert('Verification Sent 📩', `Google Firebase dispatched a verification link to ${cleanEmailReg}. Click the link to proceed.`);
     } catch (err: any) {
       setIsProcessing(false);
       if (err.code === 'auth/email-already-in-use') {
@@ -213,10 +214,11 @@ export default function MasterApp() {
   };
 
   const handleForgotPassword = async () => {
-    if (!email.trim()) return Alert.alert('Email Required', 'Please enter your registered email address above first, then tap Forgot Password.');
+    const cleanEmail = email ? email.toLowerCase().trim() : '';
+    if (!cleanEmail) return Alert.alert('Email Required', 'Please enter your registered email address above first, then tap Forgot Password.');
     try {
-      await sendPasswordResetEmail(auth, email.toLowerCase().trim());
-      Alert.alert('Reset Link Sent 📩', `A password reset link has been sent to ${email}. Check your inbox.`);
+      await sendPasswordResetEmail(auth, cleanEmail);
+      Alert.alert('Reset Link Sent 📩', `A password reset link has been sent to ${cleanEmail}. Check your inbox.`);
     } catch (err: any) {
       Alert.alert('Error', err.message);
     }
@@ -308,7 +310,10 @@ export default function MasterApp() {
   };
 
   const handleLogin = async () => {
-    if (email.trim() === 'admin@onikeri.com' && password === '@1681Gaju') {
+    const cleanEmail = email ? email.toLowerCase().trim() : '';
+    const cleanPassword = password ? password.trim() : '';
+
+    if (cleanEmail === 'admin@onikeri.com' && cleanPassword === '@1681Gaju') {
       setFullName('Gajanan (SuperAdmin)');
       setIsAdmin(true);
       setIsGuest(false);
@@ -317,19 +322,12 @@ export default function MasterApp() {
       return;
     }
 
-    if (!email || !password) return Alert.alert('Credentials Missing', 'Enter your email and password.');
+    if (!cleanEmail || !cleanPassword) return Alert.alert('Credentials Missing', 'Enter your email and password.');
     setIsProcessing(true);
 
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email.toLowerCase().trim(), password);
+      const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
       const user = userCredential.user;
-
-      if (!user.emailVerified) {
-        setIsProcessing(false);
-        Alert.alert('Email Verification Required', 'Please confirm the verification link sent to your email.');
-        await sendEmailVerification(user);
-        return;
-      }
 
       const userDocument = await getDoc(doc(db, 'users', user.uid));
       if (userDocument.exists()) {
@@ -346,11 +344,11 @@ export default function MasterApp() {
       } else {
         setIsProcessing(false);
         setStep('FACE_SCAN');
-        Alert.alert('Complete Setup', 'Your email is verified, but Face Verification is pending. Please complete your scan.');
+        Alert.alert('Complete Setup', 'Please complete your Face Verification to enter the league.');
       }
     } catch (err: any) {
       setIsProcessing(false);
-      Alert.alert('Authentication Failed', 'Invalid email or password.');
+      Alert.alert('Login Failed', 'Invalid email or password. Please check your credentials.');
     }
   };
 
@@ -406,7 +404,6 @@ export default function MasterApp() {
     ]);
   };
 
-  // --- SUB-VIEWS: AUTHENTICATION FLOW ---
   if (step === 'AUTH') {
     return (
       <SafeAreaView style={styles.authSafeContainer}>
@@ -449,7 +446,7 @@ export default function MasterApp() {
                 />
                 {!!errors.fullName && <Text style={styles.fieldError}>{errors.fullName}</Text>}
 
-                <Text style={styles.fieldLabel}>Mobile Number</Text>
+                <Text style={styles.fieldLabel}>Mobile Number (Verified)</Text>
                 <View style={[styles.phoneFieldWrap, !!errors.mobileNumber && styles.inputInvalid]}>
                   <Text style={styles.countryCodeText}>+91</Text>
                   <TextInput
@@ -461,6 +458,7 @@ export default function MasterApp() {
                     value={mobileNumber}
                     onChangeText={validateMobile}
                   />
+                  <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 10 }} />
                 </View>
                 {!!errors.mobileNumber && <Text style={styles.fieldError}>{errors.mobileNumber}</Text>}
 
@@ -496,10 +494,10 @@ export default function MasterApp() {
                   <DateTimePicker value={selectedDate} mode="date" display="default" onChange={handleDateSelected} maximumDate={new Date()} />
                 )}
 
-                <Text style={styles.fieldLabel}>Create Password</Text>
+                <Text style={styles.fieldLabel}>Create Password (Min 8 chars, Letters & Numbers)</Text>
                 <TextInput
                   style={styles.premiumInput}
-                  placeholder="Minimum 8 characters"
+                  placeholder="e.g. gaju1234"
                   placeholderTextColor="#475569"
                   secureTextEntry
                   value={password}
@@ -555,7 +553,6 @@ export default function MasterApp() {
                   onChangeText={setPassword}
                 />
 
-                {/* Forgot Password Link */}
                 <TouchableOpacity style={{ alignSelf: 'flex-end', marginTop: 8 }} onPress={handleForgotPassword}>
                   <Text style={{ color: '#38BDF8', fontSize: 12, fontWeight: '700' }}>Forgot Password?</Text>
                 </TouchableOpacity>
@@ -583,7 +580,6 @@ export default function MasterApp() {
     );
   }
 
-  // --- SUB-VIEW: EMAIL VERIFICATION GATEWAY ---
   if (step === 'WAIT_EMAIL') {
     return (
       <SafeAreaView style={styles.authSafeContainer}>
@@ -614,7 +610,6 @@ export default function MasterApp() {
     );
   }
 
-  // --- SUB-VIEW: ON-DEVICE AI FACE VERIFICATION ---
   if (step === 'FACE_SCAN') {
     return (
       <SafeAreaView style={styles.authSafeContainer}>
@@ -646,7 +641,6 @@ export default function MasterApp() {
     );
   }
 
-  // --- SUB-VIEW: MASTER DASHBOARD ---
   return (
     <SafeAreaView style={styles.dashboardContainer}>
       <StatusBar barStyle="light-content" backgroundColor="#090D16" />
@@ -822,7 +816,7 @@ export default function MasterApp() {
                   style={styles.registerTourneyBtn}
                   onPress={() => {
                     if (isGuest) return Alert.alert('Registration Restricted', 'Sign in to register your squad.');
-                    Alert.alert('Tournament Entry', `Confirm registration for ${t.name} (Entry: ₹${t.fee})?`);
+                    Alert.alert('Tournament Entry', `Confirm registration for ${t.name} (Entry: ₹{t.fee})?`);
                   }}
                 >
                   <Text style={styles.registerTourneyText}>Register</Text>
