@@ -34,7 +34,9 @@ import {
   getDocs, 
   onSnapshot, 
   updateDoc, 
-  arrayUnion 
+  arrayUnion,
+  query,
+  where 
 } from 'firebase/firestore';
 
 const { width } = Dimensions.get('window');
@@ -53,18 +55,23 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 export default function MasterApp() {
-  // Navigation & Auth States ('AUTH' | 'OTP' | 'PROFILE_SETUP' | 'DASHBOARD')
-  const [step, setStep] = useState<'AUTH' | 'OTP' | 'PROFILE_SETUP' | 'DASHBOARD'>('AUTH');
+  // Navigation & Auth States
+  const [step, setStep] = useState<'AUTH' | 'ADMIN_PASS' | 'OTP' | 'PROFILE_SETUP' | 'DASHBOARD'>('AUTH');
   const [activeTab, setActiveTab] = useState<'Home' | 'Matches' | 'Turfs' | 'Profile'>('Home');
 
   // User Identity States
   const [currentUserUid, setCurrentUserUid] = useState<string>('');
   const [isGuest, setIsGuest] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  
+  // Inputs
+  const [identifierInput, setIdentifierInput] = useState('');
+  const [adminPasswordInput, setAdminPasswordInput] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [serverOtp, setServerOtp] = useState(''); // Used for OTP validation
+  
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-  const [generatedOtp, setGeneratedOtp] = useState('');
   const [dob, setDob] = useState('');
   const [profileImage, setProfileImage] = useState<string | null>(null);
 
@@ -75,11 +82,11 @@ export default function MasterApp() {
   const [refreshing, setRefreshing] = useState(false);
   const [greeting, setGreeting] = useState('Welcome');
 
-  // Dashboard Data Models (Synced live from Firestore)
-  const [walletBalance, setWalletBalance] = useState(2500);
+  // Dashboard Data Models
+  const [walletBalance, setWalletBalance] = useState(0);
   const [teamCode, setTeamCode] = useState('');
   const [createdTeamName, setCreatedTeamName] = useState('');
-  const [userStats, setUserStats] = useState({ matches: 18, runs: 462, wickets: 14, rank: '#4' });
+  const [userStats, setUserStats] = useState({ matches: 0, runs: 0, wickets: 0, rank: 'Unranked' });
   
   const [liveMatch, setLiveMatch] = useState({
     tournament: 'Onikeri Super League • Final',
@@ -101,10 +108,10 @@ export default function MasterApp() {
 
   const [turfSlots, setTurfSlots] = useState([
     { id: 's1', time: '06:00 AM - 07:00 AM', status: 'Available', price: '₹600', bookedBy: '' },
-    { id: 's2', time: '07:00 AM - 08:00 AM', status: 'Booked', price: '₹600', bookedBy: 'Admin' },
+    { id: 's2', time: '07:00 AM - 08:00 AM', status: 'Available', price: '₹600', bookedBy: '' },
     { id: 's3', time: '06:00 PM - 07:00 PM', status: 'Available', price: '₹900', bookedBy: '' },
     { id: 's4', time: '07:00 PM - 08:00 PM', status: 'Available', price: '₹1000', bookedBy: '' },
-    { id: 's5', time: '08:00 PM - 09:00 PM', status: 'Booked', price: '₹1000', bookedBy: 'Captain' },
+    { id: 's5', time: '08:00 PM - 09:00 PM', status: 'Available', price: '₹1000', bookedBy: '' },
     { id: 's6', time: '09:00 PM - 10:00 PM', status: 'Available', price: '₹1000', bookedBy: '' },
   ]);
 
@@ -122,20 +129,17 @@ export default function MasterApp() {
     else if (hr < 17) setGreeting('Good Afternoon');
     else setGreeting('Good Evening');
 
-    // Real-time listener for Turf Slots so bookings sync globally for all users
+    // Real-time listener for Turf Slots globally
     const unsubscribeTurfs = onSnapshot(doc(db, 'config', 'turfsData'), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        if (data && data.slots) {
-          setTurfSlots(data.slots);
-        }
+        if (data && data.slots) setTurfSlots(data.slots);
       } else {
-        // Initialize default turfs in Firestore if not present
         setDoc(doc(db, 'config', 'turfsData'), { slots: turfSlots });
       }
     });
 
-    // Real-time listener for Teams
+    // Real-time listener for Teams globally
     const unsubscribeTeams = onSnapshot(collection(db, 'teams'), (snapshot) => {
       const teamsList: any[] = [];
       snapshot.forEach((doc) => teamsList.push({ id: doc.id, ...doc.data() }));
@@ -150,57 +154,107 @@ export default function MasterApp() {
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1200);
+    setTimeout(() => setRefreshing(false), 1200);
   }, []);
 
-  // --- MOBILE + OTP AUTHENTICATION FLOW ---
-  const handleSendOtp = async () => {
-    const cleanMobile = mobileNumber.trim();
-    if (!/^[6-9]\d{9}$/.test(cleanMobile)) {
-      return Alert.alert('Invalid Mobile', 'Please enter a valid 10-digit Indian mobile number.');
+  // --- 1. SMART ROUTING (Admin vs Player) ---
+  const handleAuthProceed = async () => {
+    const input = identifierInput.trim().toLowerCase();
+
+    // Strict Admin Gateway
+    if (input === 'admin@onikeri.com') {
+      setStep('ADMIN_PASS');
+      return;
+    }
+
+    // Strict Player Gateway
+    if (!/^[6-9]\d{9}$/.test(input)) {
+      return Alert.alert('Invalid Input', 'Please enter a valid 10-digit Indian mobile number.');
     }
 
     setIsProcessing(true);
-    // Generate a secure 4-digit OTP (displays in alert for instant testing convenience)
-    const mockOtp = Math.floor(1000 + Math.random() * 9000).toString();
-    setGeneratedOtp(mockOtp);
-    setIsProcessing(false);
+    setMobileNumber(input);
 
-    setStep('OTP');
-    Alert.alert('OTP Dispatched 📱', `Verification code sent to +91 ${cleanMobile}.\n\n[Test Code: ${mockOtp}]`);
+    try {
+      // PRODUCTION REAL OTP DISPATCH LOGIC
+      // Note: To make this push real SMS to phones, you connect your Fast2SMS or Twilio API key here.
+      // For now, it generates a secure token and logs it to the alert for testing.
+      const generatedToken = Math.floor(1000 + Math.random() * 9000).toString();
+      setServerOtp(generatedToken); 
+      
+      /* 
+      // Example Production API Call:
+      await fetch('https://www.fast2sms.com/dev/bulkV2', {
+        method: 'POST',
+        headers: { 'authorization': 'YOUR_API_KEY' },
+        body: `variables_values=${generatedToken}&route=otp&numbers=${input}`
+      });
+      */
+
+      setIsProcessing(false);
+      setStep('OTP');
+      Alert.alert('OTP Sent 📲', `A secure code was dispatched to +91 ${input}.\n\n[Test Code: ${generatedToken}]`);
+    } catch (err: any) {
+      setIsProcessing(false);
+      Alert.alert('Network Error', 'Failed to dispatch OTP. Check your connection.');
+    }
   };
 
+  // --- 2. SECURE ADMIN LOGIN ---
+  const handleAdminLogin = async () => {
+    if (adminPasswordInput !== '@1681Admin') {
+      return Alert.alert('Access Denied', 'Incorrect administrator password.');
+    }
+
+    setIsProcessing(true);
+    setFullName('System Administrator');
+    setMobileNumber('Admin');
+    setIsAdmin(true);
+    setIsGuest(false);
+    setCurrentUserUid('admin_super');
+
+    setIsProcessing(false);
+    setStep('DASHBOARD');
+    setActiveTab('Home');
+    Alert.alert('God Mode Enabled 🛡️', 'Full system control granted.');
+  };
+
+  // --- 3. PLAYER OTP VERIFICATION ---
   const handleVerifyOtp = async () => {
-    if (otpCode.trim() !== generatedOtp && otpCode.trim() !== '1234') {
+    if (otpCode.trim() !== serverOtp && otpCode.trim() !== '1234') {
       return Alert.alert('Invalid OTP', 'The verification code entered is incorrect.');
     }
 
     setIsProcessing(true);
-    const cleanMobile = mobileNumber.trim();
-    const userUid = `user_${cleanMobile}`;
+    const userUid = `user_${mobileNumber}`;
     setCurrentUserUid(userUid);
 
     try {
+      // Check if user already has a fully completed profile in Firestore
       const userDocRef = doc(db, 'users', userUid);
       const userDoc = await getDoc(userDocRef);
 
       if (userDoc.exists()) {
-        // Returning User: Load profile data and enter dashboard instantly
         const data = userDoc.data();
-        setFullName(data.fullName || 'Player');
-        setProfileImage(data.photoURL || null);
-        setWalletBalance(data.walletBalance || 100);
-        const adminCheck = cleanMobile === '9999999999' || data.role === 'SuperAdmin';
-        setIsAdmin(adminCheck);
+        
+        // STRICT CHECK: Ensure they didn't bypass Name or Photo previously
+        if (!data.fullName || !data.photoURL) {
+          setIsProcessing(false);
+          setStep('PROFILE_SETUP');
+          return Alert.alert('Profile Incomplete', 'You must provide your Name and Photo to continue.');
+        }
+
+        setFullName(data.fullName);
+        setProfileImage(data.photoURL);
+        setWalletBalance(data.walletBalance || 0);
+        setIsAdmin(false);
+        setIsGuest(false);
 
         setIsProcessing(false);
         setStep('DASHBOARD');
         setActiveTab('Home');
-        Alert.alert('Welcome Back 🏏', `Logged in successfully as ${data.fullName}`);
       } else {
-        // New User: Proceed to Profile & Face Verification setup
+        // Brand new user -> Force Profile Setup
         setIsProcessing(false);
         setStep('PROFILE_SETUP');
       }
@@ -210,12 +264,13 @@ export default function MasterApp() {
     }
   };
 
+  // --- 4. STRICT PROFILE CREATION ---
   const pickImage = async () => {
     let res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.15,
+      quality: 0.15, // Highly compressed to save database space automatically
     });
     if (!res.canceled) {
       setProfileImage(res.assets[0].uri);
@@ -224,47 +279,43 @@ export default function MasterApp() {
 
   const handleCompleteProfile = async () => {
     if (!fullName.trim() || fullName.trim().length < 3) {
-      return Alert.alert('Name Required', 'Please enter a valid full name (at least 3 characters).');
+      return Alert.alert('Name Required', 'Please enter your real full name.');
     }
     if (dob.length !== 10) {
-      return Alert.alert('DOB Required', 'Please select or enter your Date of Birth.');
+      return Alert.alert('DOB Required', 'Please provide your Date of Birth.');
+    }
+    if (!profileImage) {
+      return Alert.alert('Photo Required', 'Face / Profile verification photo is strictly required to join.');
     }
 
     setIsProcessing(true);
     try {
+      // Convert Image to Secure Base64 String for Free Firebase Storage
       let base64data = null;
-      if (profileImage) {
-        try {
-          const response = await fetch(profileImage);
-          const blob = await response.blob();
-          base64data = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onerror = reject;
-            reader.onload = () => resolve(reader.result as string);
-            reader.readAsDataURL(blob);
-          });
-        } catch (e) {
-          console.log('Image conversion skipped');
-        }
-      }
-
-      const userUid = currentUserUid || `user_${mobileNumber.trim()}`;
-      const isAdminUser = mobileNumber.trim() === '9999999999';
+      const response = await fetch(profileImage);
+      const blob = await response.blob();
+      base64data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = reject;
+        reader.onload = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
 
       const userData = {
-        uid: userUid,
+        uid: currentUserUid,
         fullName: fullName.trim(),
-        mobileNumber: mobileNumber.trim(),
+        mobileNumber: mobileNumber,
         dob,
-        role: isAdminUser ? 'SuperAdmin' : 'Player',
+        role: 'Player',
         photoURL: base64data,
-        walletBalance: 250,
+        walletBalance: 100, // Welcome Bonus
         registeredAt: new Date().toISOString(),
       };
 
-      await setDoc(doc(db, 'users', userUid), userData);
+      await setDoc(doc(db, 'users', currentUserUid), userData);
 
-      setIsAdmin(isAdminUser);
+      setWalletBalance(100);
+      setIsAdmin(false);
       setIsProcessing(false);
       setIsGuest(false);
       Alert.alert('Registration Complete 🎉', 'Welcome to Onikeri Premier League!');
@@ -305,7 +356,7 @@ export default function MasterApp() {
         createdAt: new Date().toISOString(),
       });
 
-      Alert.alert('Team Created 🏏', `Squad Pass-Key: ${randomCode}\nShare this with your players to join!`);
+      Alert.alert('Team Created 🏏', `Squad Pass-Key: ${randomCode}\nShare this code with players so they can join!`);
       setCreatedTeamName('');
       setModalType('NONE');
     } catch (err: any) {
@@ -324,10 +375,10 @@ export default function MasterApp() {
       if (!teamSnap.exists()) return Alert.alert('Not Found', 'No team squad matches this 6-digit pass-key.');
 
       await updateDoc(teamRef, {
-        members: arrayUnion({ name: fullName || 'Player', mobile: mobileNumber || '9999999999', role: 'Player' })
+        members: arrayUnion({ name: fullName, mobile: mobileNumber, role: 'Player' })
       });
 
-      Alert.alert('Joined Successfully 🏆', `You are now part of squad: ${cleanCode}`);
+      Alert.alert('Joined Successfully 🏆', `You are now a registered player for squad: ${cleanCode}`);
       setTeamCode('');
     } catch (err: any) {
       Alert.alert('Error', err.message);
@@ -337,7 +388,7 @@ export default function MasterApp() {
   // --- TURF SLOT BOOKINGS (Global Sync) ---
   const handleBookSlot = (slot: typeof turfSlots[0]) => {
     if (isGuest) return Alert.alert('Player Only', 'Guest accounts cannot book turf matches.');
-    if (slot.status === 'Booked') return Alert.alert('Unavailable', `This slot is already reserved by ${slot.bookedBy || 'another player'}.`);
+    if (slot.status === 'Booked') return Alert.alert('Unavailable', `This slot is already reserved by ${slot.bookedBy}.`);
     
     Alert.alert('Slot Reservation', `Confirm booking for ${slot.time} (${slot.price})?`, [
       { text: 'Cancel', style: 'cancel' },
@@ -350,12 +401,12 @@ export default function MasterApp() {
           setWalletBalance((prev) => prev - numPrice);
 
           const updatedSlots = turfSlots.map((s) => 
-            s.id === slot.id ? { ...s, status: 'Booked', bookedBy: fullName || 'Player' } : s
+            s.id === slot.id ? { ...s, status: 'Booked', bookedBy: fullName } : s
           );
 
           try {
             await setDoc(doc(db, 'config', 'turfsData'), { slots: updatedSlots });
-            Alert.alert('Confirmed ✅', `Slot reserved! Confirmation receipt saved globally.`);
+            Alert.alert('Confirmed ✅', `Slot reserved globally!`);
           } catch (err: any) {
             Alert.alert('Booking Error', err.message);
           }
@@ -374,8 +425,8 @@ export default function MasterApp() {
       name: 'Onikeri Premier League',
       prefill: {
         email: 'player@onikeri.com',
-        contact: mobileNumber || '9999999999',
-        name: fullName || 'Valued Player',
+        contact: mobileNumber,
+        name: fullName,
       },
       theme: { color: '#0284C7' },
     };
@@ -391,7 +442,10 @@ export default function MasterApp() {
       });
   };
 
-  // --- SUB-VIEW: MOBILE AUTHENTICATION SCREEN ---
+  // ==========================================
+  // UI RENDERING STRATEGY
+  // ==========================================
+
   if (step === 'AUTH') {
     return (
       <SafeAreaView style={styles.authSafeContainer}>
@@ -403,29 +457,22 @@ export default function MasterApp() {
             </View>
             <Text style={styles.leagueTag}>OFFICIAL LEAGUE PORTAL</Text>
             <Text style={styles.authMainTitle}>Onikeri Premier League</Text>
-            <Text style={styles.authSubTitle}>Instant Mobile Authentication & Turf Management.</Text>
+            <Text style={styles.authSubTitle}>Enter Mobile Number to login or register seamlessly.</Text>
           </View>
 
           <View style={styles.glassCard}>
-            <Text style={styles.fieldLabel}>Mobile Number (+91)</Text>
-            <View style={styles.phoneFieldWrap}>
-              <Text style={styles.countryCodeText}>+91</Text>
-              <TextInput
-                style={styles.phoneInputField}
-                placeholder="Enter 10-digit mobile number"
-                placeholderTextColor="#475569"
-                keyboardType="number-pad"
-                maxLength={10}
-                value={mobileNumber}
-                onChangeText={setMobileNumber}
-              />
-              {/^[6-9]\d{9}$/.test(mobileNumber.trim()) && (
-                <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 10 }} />
-              )}
-            </View>
+            <Text style={styles.fieldLabel}>Mobile Number / Admin Login</Text>
+            <TextInput
+              style={styles.premiumInput}
+              placeholder="10-digit mobile or admin email"
+              placeholderTextColor="#475569"
+              autoCapitalize="none"
+              value={identifierInput}
+              onChangeText={setIdentifierInput}
+            />
 
-            <TouchableOpacity style={styles.mainActionBtn} onPress={handleSendOtp} disabled={isProcessing}>
-              {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Send OTP Verification</Text>}
+            <TouchableOpacity style={styles.mainActionBtn} onPress={handleAuthProceed} disabled={isProcessing}>
+              {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Proceed</Text>}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -445,17 +492,47 @@ export default function MasterApp() {
     );
   }
 
-  // --- SUB-VIEW: OTP VERIFICATION SCREEN ---
+  if (step === 'ADMIN_PASS') {
+    return (
+      <SafeAreaView style={styles.authSafeContainer}>
+        <View style={styles.verificationCard}>
+          <View style={[styles.verificationIconBubble, { backgroundColor: 'rgba(239, 68, 68, 0.1)', borderColor: '#EF4444' }]}>
+            <Ionicons name="shield-checkmark" size={48} color="#EF4444" />
+          </View>
+          <Text style={styles.authMainTitle}>System Administrator</Text>
+          <Text style={styles.verifyDescription}>Enter secure credential key to bypass player matrix.</Text>
+
+          <TextInput
+            style={[styles.premiumInput, { width: '80%', marginBottom: 20, textAlign: 'center' }]}
+            placeholder="Admin Password"
+            placeholderTextColor="#475569"
+            secureTextEntry
+            value={adminPasswordInput}
+            onChangeText={setAdminPasswordInput}
+          />
+
+          <TouchableOpacity style={[styles.mainActionBtn, { backgroundColor: '#EF4444', width: '80%' }]} onPress={handleAdminLogin} disabled={isProcessing}>
+            {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Initialize God Mode</Text>}
+          </TouchableOpacity>
+
+          <TouchableOpacity style={{ marginTop: 20 }} onPress={() => setStep('AUTH')}>
+            <Text style={{ color: '#94A3B8', fontSize: 13, fontWeight: '600' }}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (step === 'OTP') {
     return (
       <SafeAreaView style={styles.authSafeContainer}>
         <View style={styles.verificationCard}>
           <View style={styles.verificationIconBubble}>
-            <Ionicons name="shield-checkmark-outline" size={48} color="#38BDF8" />
+            <Ionicons name="chatbubble-ellipses-outline" size={48} color="#38BDF8" />
           </View>
-          <Text style={styles.authMainTitle}>Enter Verification Code</Text>
+          <Text style={styles.authMainTitle}>Enter OTP</Text>
           <Text style={styles.verifyDescription}>
-            Enter the 4-digit code sent via SMS to <Text style={{ color: '#38BDF8', fontWeight: '700' }}>+91 {mobileNumber}</Text>
+            We sent a secure verification code to <Text style={{ color: '#38BDF8', fontWeight: '700' }}>+91 {mobileNumber}</Text>
           </Text>
 
           <TextInput
@@ -468,8 +545,8 @@ export default function MasterApp() {
             onChangeText={setOtpCode}
           />
 
-          <TouchableOpacity style={styles.mainActionBtn} onPress={handleVerifyOtp} disabled={isProcessing}>
-            {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Verify & Proceed</Text>}
+          <TouchableOpacity style={[styles.mainActionBtn, { width: '80%' }]} onPress={handleVerifyOtp} disabled={isProcessing}>
+            {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Verify Identity</Text>}
           </TouchableOpacity>
 
           <TouchableOpacity style={{ marginTop: 20 }} onPress={() => setStep('AUTH')}>
@@ -480,7 +557,6 @@ export default function MasterApp() {
     );
   }
 
-  // --- SUB-VIEW: PROFILE & PHOTO SETUP ---
   if (step === 'PROFILE_SETUP') {
     return (
       <SafeAreaView style={styles.authSafeContainer}>
@@ -489,9 +565,9 @@ export default function MasterApp() {
             <View style={[styles.verificationIconBubble, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
               <MaterialCommunityIcons name="face-recognition" size={48} color="#38BDF8" />
             </View>
-            <Text style={styles.authMainTitle}>Player Profile Setup</Text>
+            <Text style={styles.authMainTitle}>League Registration</Text>
             <Text style={styles.verifyDescription}>
-              Complete your player profile and upload a profile photo for league verification.
+              Welcome! To maintain security and avoid duplicates, you must provide your real Name, DOB, and Face Photo.
             </Text>
 
             <TouchableOpacity style={styles.avatarDropBox} onPress={pickImage}>
@@ -500,13 +576,13 @@ export default function MasterApp() {
               ) : (
                 <View style={{ alignItems: 'center' }}>
                   <Ionicons name="camera-outline" size={44} color="#64748B" />
-                  <Text style={{ color: '#64748B', marginTop: 8, fontSize: 13 }}>Tap to Select Photo</Text>
+                  <Text style={{ color: '#64748B', marginTop: 8, fontSize: 13, fontWeight: '700' }}>Tap to Upload Photo *</Text>
                 </View>
               )}
             </TouchableOpacity>
 
             <View style={{ width: '100%', marginBottom: 15 }}>
-              <Text style={styles.fieldLabel}>Full Name</Text>
+              <Text style={styles.fieldLabel}>Full Legal Name *</Text>
               <TextInput
                 style={styles.premiumInput}
                 placeholder="e.g. Gajanan"
@@ -515,7 +591,7 @@ export default function MasterApp() {
                 onChangeText={setFullName}
               />
 
-              <Text style={styles.fieldLabel}>Date of Birth (DD-MM-YYYY)</Text>
+              <Text style={styles.fieldLabel}>Date of Birth (DD-MM-YYYY) *</Text>
               <View style={styles.phoneFieldWrap}>
                 <TextInput
                   style={styles.phoneInputField}
@@ -524,7 +600,13 @@ export default function MasterApp() {
                   keyboardType="number-pad"
                   maxLength={10}
                   value={dob}
-                  onChangeText={setDob}
+                  onChangeText={(text) => {
+                    let clean = text.replace(/[^0-9]/g, '');
+                    let formatted = clean;
+                    if (clean.length > 2) formatted = clean.substring(0, 2) + '-' + clean.substring(2);
+                    if (clean.length > 4) formatted = formatted.substring(0, 5) + '-' + clean.substring(4, 8);
+                    setDob(formatted);
+                  }}
                 />
                 <TouchableOpacity onPress={() => setShowDatePicker(true)} style={{ paddingRight: 14 }}>
                   <Ionicons name="calendar" size={22} color="#38BDF8" />
@@ -548,7 +630,7 @@ export default function MasterApp() {
             </View>
 
             <TouchableOpacity style={styles.mainActionBtn} onPress={handleCompleteProfile} disabled={isProcessing}>
-              {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Save & Enter League</Text>}
+              {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Create Player Account</Text>}
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -575,7 +657,7 @@ export default function MasterApp() {
           <View style={{ marginLeft: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Text style={styles.greetingSub}>{greeting}</Text>
-              {isAdmin && <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>ADMIN</Text></View>}
+              {isAdmin && <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>SUPER ADMIN</Text></View>}
               {isGuest && <View style={styles.guestBadge}><Text style={styles.guestBadgeText}>GUEST</Text></View>}
             </View>
             <Text style={styles.greetingTitle}>{fullName.split(' ')[0]}</Text>
@@ -602,17 +684,19 @@ export default function MasterApp() {
       >
         {activeTab === 'Home' && (
           <>
-            <View style={styles.walletHeroCard}>
-              <View>
-                <Text style={styles.walletHeaderLabel}>Available Balance</Text>
-                <Text style={styles.walletHeaderValue}>₹{walletBalance.toLocaleString('en-IN')}.00</Text>
-                <Text style={styles.walletSubText}>Onikeri Instant Pay Enabled</Text>
+            {!isAdmin && !isGuest && (
+              <View style={styles.walletHeroCard}>
+                <View>
+                  <Text style={styles.walletHeaderLabel}>Available Balance</Text>
+                  <Text style={styles.walletHeaderValue}>₹{walletBalance.toLocaleString('en-IN')}.00</Text>
+                  <Text style={styles.walletSubText}>Onikeri Instant Pay Enabled</Text>
+                </View>
+                <TouchableOpacity style={styles.addFundsBtn} onPress={() => setModalType('RAZORPAY')}>
+                  <Ionicons name="add-circle" size={20} color="#090D16" />
+                  <Text style={styles.addFundsBtnText}>Top Up</Text>
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity style={styles.addFundsBtn} onPress={() => setModalType('RAZORPAY')}>
-                <Ionicons name="add-circle" size={20} color="#090D16" />
-                <Text style={styles.addFundsBtnText}>Top Up</Text>
-              </TouchableOpacity>
-            </View>
+            )}
 
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionHeading}>Live Match Arena</Text>
@@ -645,34 +729,36 @@ export default function MasterApp() {
               </View>
             </View>
 
-            <View style={styles.joinTeamBox}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <FontAwesome5 name="users" size={16} color="#38BDF8" />
-                  <Text style={[styles.sectionHeading, { marginLeft: 8, marginBottom: 0 }]}>Squad Management</Text>
+            {!isAdmin && (
+              <View style={styles.joinTeamBox}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <FontAwesome5 name="users" size={16} color="#38BDF8" />
+                    <Text style={[styles.sectionHeading, { marginLeft: 8, marginBottom: 0 }]}>Squad Management</Text>
+                  </View>
+                  {!isGuest && (
+                    <TouchableOpacity onPress={() => setModalType('CREATE_TEAM')}>
+                      <Text style={{ color: '#38BDF8', fontWeight: '700', fontSize: 12 }}>+ Create Team</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
-                {!isGuest && (
-                  <TouchableOpacity onPress={() => setModalType('CREATE_TEAM')}>
-                    <Text style={{ color: '#38BDF8', fontWeight: '700', fontSize: 12 }}>+ Create Team</Text>
+                <Text style={styles.joinTeamDesc}>Enter the 6-digit pass-key dispatched by your Team Captain to join squads.</Text>
+                <View style={styles.teamCodeInputRow}>
+                  <TextInput
+                    style={styles.teamCodeInput}
+                    placeholder="e.g. OP89K2"
+                    placeholderTextColor="#475569"
+                    autoCapitalize="characters"
+                    maxLength={6}
+                    value={teamCode}
+                    onChangeText={setTeamCode}
+                  />
+                  <TouchableOpacity style={styles.joinTeamActionBtn} onPress={handleJoinTeam}>
+                    <Text style={styles.joinTeamActionText}>Join Squad</Text>
                   </TouchableOpacity>
-                )}
+                </View>
               </View>
-              <Text style={styles.joinTeamDesc}>Enter the 6-digit pass-key dispatched by your Team Captain to join squads.</Text>
-              <View style={styles.teamCodeInputRow}>
-                <TextInput
-                  style={styles.teamCodeInput}
-                  placeholder="e.g. OP89K2"
-                  placeholderTextColor="#475569"
-                  autoCapitalize="characters"
-                  maxLength={6}
-                  value={teamCode}
-                  onChangeText={setTeamCode}
-                />
-                <TouchableOpacity style={styles.joinTeamActionBtn} onPress={handleJoinTeam}>
-                  <Text style={styles.joinTeamActionText}>Join Squad</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+            )}
 
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionHeading}>Instant Slot Booking (Live)</Text>
@@ -738,7 +824,7 @@ export default function MasterApp() {
                 <TouchableOpacity
                   style={styles.registerTourneyBtn}
                   onPress={() => {
-                    if (isGuest) return Alert.alert('Registration Restricted', 'Sign in to register your squad.');
+                    if (isGuest || isAdmin) return Alert.alert('Restricted', 'Only standard players can register.');
                     Alert.alert('Tournament Entry', `Confirm registration for ${t.name} (Entry: ₹{t.fee})?`);
                   }}
                 >
@@ -789,27 +875,29 @@ export default function MasterApp() {
               )}
               <Text style={styles.profileNameDisplay}>{fullName}</Text>
               <Text style={styles.profileRoleDisplay}>{isAdmin ? 'Super Administrator' : isGuest ? 'Guest User' : 'Verified League Player'}</Text>
-              <Text style={{ color: '#64748B', fontSize: 12, marginTop: 4 }}>Mobile: +91 {mobileNumber || '9999999999'}</Text>
+              {!isGuest && !isAdmin && <Text style={{ color: '#64748B', fontSize: 12, marginTop: 4 }}>Mobile: +91 {mobileNumber}</Text>}
             </View>
 
-            <View style={styles.statsCardGrid}>
-              <View style={styles.statBox}>
-                <Text style={styles.statVal}>{userStats.matches}</Text>
-                <Text style={styles.statLbl}>Matches</Text>
+            {!isAdmin && !isGuest && (
+              <View style={styles.statsCardGrid}>
+                <View style={styles.statBox}>
+                  <Text style={styles.statVal}>{userStats.matches}</Text>
+                  <Text style={styles.statLbl}>Matches</Text>
+                </View>
+                <View style={styles.statBox}>
+                  <Text style={styles.statVal}>{userStats.runs}</Text>
+                  <Text style={styles.statLbl}>Runs</Text>
+                </View>
+                <View style={styles.statBox}>
+                  <Text style={styles.statVal}>{userStats.wickets}</Text>
+                  <Text style={styles.statLbl}>Wickets</Text>
+                </View>
+                <View style={styles.statBox}>
+                  <Text style={[styles.statVal, { color: '#38BDF8' }]}>{userStats.rank}</Text>
+                  <Text style={styles.statLbl}>Ranking</Text>
+                </View>
               </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statVal}>{userStats.runs}</Text>
-                <Text style={styles.statLbl}>Runs</Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={styles.statVal}>{userStats.wickets}</Text>
-                <Text style={styles.statLbl}>Wickets</Text>
-              </View>
-              <View style={styles.statBox}>
-                <Text style={[styles.statVal, { color: '#38BDF8' }]}>{userStats.rank}</Text>
-                <Text style={styles.statLbl}>Ranking</Text>
-              </View>
-            </View>
+            )}
 
             <TouchableOpacity
               style={[styles.menuItem, { marginTop: 24, borderColor: '#EF4444' }]}
@@ -817,6 +905,8 @@ export default function MasterApp() {
                 await signOut(auth);
                 setIsGuest(false);
                 setIsAdmin(false);
+                setIdentifierInput('');
+                setAdminPasswordInput('');
                 setStep('AUTH');
               }}
             >
@@ -871,12 +961,14 @@ export default function MasterApp() {
       {/* ADMIN GOD MODE AUDIT MATRIX */}
       <Modal visible={modalType === 'ADMIN_MATRIX'} transparent animationType="slide">
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalSheet, { maxHeight: '85%' }]}>
+          <View style={[styles.modalSheet, { maxHeight: '90%' }]}>
             <Text style={[styles.modalTitle, { color: '#EF4444' }]}>System God Mode & Audit Center</Text>
             <Text style={styles.modalSub}>Full administrative permissions over registered players, turf bookings, and team squads.</Text>
 
             <ScrollView style={{ width: '100%', marginVertical: 15 }} showsVerticalScrollIndicator={false}>
-              <Text style={{ color: '#38BDF8', fontWeight: '800', fontSize: 13, marginBottom: 8 }}>👥 All Registered Users ({allRegisteredUsers.length})</Text>
+              
+              <Text style={styles.adminSectionHeader}>👥 All Registered Users ({allRegisteredUsers.length})</Text>
+              {allRegisteredUsers.length === 0 ? <Text style={styles.emptyState}>No users registered yet.</Text> : null}
               {allRegisteredUsers.map((u, i) => (
                 <View key={i} style={styles.adminUserRow}>
                   {u.photoURL ? (
@@ -888,28 +980,31 @@ export default function MasterApp() {
                   )}
                   <View style={{ marginLeft: 10, flex: 1 }}>
                     <Text style={{ color: '#F8FAFC', fontWeight: '700', fontSize: 13 }}>{u.fullName}</Text>
-                    <Text style={{ color: '#94A3B8', fontSize: 11 }}>+91 {u.mobileNumber} • {u.role}</Text>
+                    <Text style={{ color: '#94A3B8', fontSize: 11 }}>+91 {u.mobileNumber} • DOB: {u.dob}</Text>
                   </View>
                 </View>
               ))}
 
-              <Text style={{ color: '#38BDF8', fontWeight: '800', fontSize: 13, marginTop: 16, marginBottom: 8 }}>🏏 Created Teams & Squad Rosters ({allTeams.length})</Text>
+              <Text style={styles.adminSectionHeader}>🏏 Created Teams & Squad Rosters ({allTeams.length})</Text>
+              {allTeams.length === 0 ? <Text style={styles.emptyState}>No teams created yet.</Text> : null}
               {allTeams.map((team, idx) => (
                 <View key={idx} style={styles.adminCommandBtn}>
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: '#F8FAFC', fontWeight: '700', fontSize: 13 }}>{team.teamName} (Code: {team.teamCode})</Text>
                     <Text style={{ color: '#94A3B8', fontSize: 11, marginTop: 2 }}>Captain: {team.captainName} (+91 {team.captainMobile})</Text>
-                    <Text style={{ color: '#10B981', fontSize: 11, marginTop: 2 }}>Members: {team.members?.map((m: any) => m.name).join(', ')}</Text>
+                    <Text style={{ color: '#10B981', fontSize: 11, marginTop: 4 }}>
+                      Members: {team.members?.map((m: any) => m.name).join(', ')}
+                    </Text>
                   </View>
                 </View>
               ))}
 
-              <Text style={{ color: '#38BDF8', fontWeight: '800', fontSize: 13, marginTop: 16, marginBottom: 8 }}>🏟️ Turf Slot Booking Audits</Text>
+              <Text style={styles.adminSectionHeader}>🏟️ Live Turf Slot Booking Audits</Text>
               {turfSlots.map((s, idx) => (
                 <View key={idx} style={styles.adminCommandBtn}>
                   <Text style={{ color: '#F8FAFC', fontSize: 12, fontWeight: '600' }}>{s.time}</Text>
                   <Text style={{ color: s.status === 'Booked' ? '#EF4444' : '#10B981', fontSize: 12, fontWeight: '700' }}>
-                    {s.status === 'Booked' ? `Reserved by ${s.bookedBy}` : 'Available'}
+                    {s.status === 'Booked' ? `Reserved by: ${s.bookedBy}` : 'Available'}
                   </Text>
                 </View>
               ))}
@@ -956,8 +1051,8 @@ export default function MasterApp() {
               <View style={styles.notificationItem}>
                 <Ionicons name="megaphone" size={20} color="#38BDF8" />
                 <View style={{ marginLeft: 10, flex: 1 }}>
-                  <Text style={{ color: '#F8FAFC', fontWeight: '700', fontSize: 13 }}>Real-Time Booking Sync Active</Text>
-                  <Text style={{ color: '#94A3B8', fontSize: 12 }}>All turf slot reservations now sync globally across devices.</Text>
+                  <Text style={{ color: '#F8FAFC', fontWeight: '700', fontSize: 13 }}>Professional Profile Flow Active</Text>
+                  <Text style={{ color: '#94A3B8', fontSize: 12 }}>Unregistered users are now strictly required to complete Face Photo setup.</Text>
                 </View>
               </View>
             </View>
@@ -1016,7 +1111,6 @@ const styles = StyleSheet.create({
     borderColor: '#1E293B',
     paddingLeft: 12,
   },
-  countryCodeText: { color: '#38BDF8', fontWeight: '700', paddingRight: 8, fontSize: 14 },
   phoneInputField: { flex: 1, paddingVertical: 12, paddingRight: 12, color: '#F8FAFC', fontSize: 14 },
   mainActionBtn: {
     backgroundColor: '#0284C7',
@@ -1038,6 +1132,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.3)',
   },
   verifyDescription: { color: '#94A3B8', fontSize: 13, textAlign: 'center', marginVertical: 15, lineHeight: 20 },
   avatarDropBox: {
@@ -1328,6 +1424,7 @@ const styles = StyleSheet.create({
   amtSelectorText: { color: '#38BDF8', fontWeight: '800', fontSize: 14 },
   modalCloseBtn: { marginTop: 16, padding: 8 },
   modalCloseText: { color: '#EF4444', fontWeight: '700', fontSize: 13 },
+  adminSectionHeader: { color: '#38BDF8', fontWeight: '800', fontSize: 13, marginTop: 16, marginBottom: 8 },
   adminCommandBtn: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1349,6 +1446,7 @@ const styles = StyleSheet.create({
     borderColor: '#1E293B',
     marginBottom: 6,
   },
+  emptyState: { color: '#64748B', fontSize: 12, fontStyle: 'italic', marginBottom: 10 },
   notificationItem: {
     flexDirection: 'row',
     alignItems: 'center',
