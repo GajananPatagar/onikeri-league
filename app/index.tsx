@@ -254,43 +254,37 @@ export default function MasterApp() {
   };
 
   const executeFaceVerification = async () => {
-    if (!profileImage) return Alert.alert('Photo Missing', 'Upload a clear profile photo.');
     setIsProcessing(true);
 
     try {
-      const result = await FaceDetector.detectFacesAsync(profileImage, {
-        mode: FaceDetector.FaceDetectorMode.fast,
-        detectLandmarks: FaceDetector.FaceDetectorLandmarks.none,
-        runClassifications: FaceDetector.FaceDetectorClassifications.none,
-      });
-
-      if (result.faces.length === 0) {
-        setIsProcessing(false);
-        return Alert.alert('AI Reject ❌', 'No human face detected. Please upload a clear photo.');
-      }
-      if (result.faces.length > 1) {
-        setIsProcessing(false);
-        return Alert.alert('AI Reject ❌', 'Multiple faces detected. Upload a single photo.');
-      }
-
       const user = auth.currentUser;
-      if (!user) throw new Error('Active session expired.');
+      if (!user) {
+        setIsProcessing(false);
+        setStep('AUTH');
+        return Alert.alert('Session Expired', 'Please sign in again.');
+      }
 
-      const response = await fetch(profileImage);
-      const blob = await response.blob();
-      const reader = new FileReader();
-      
-      const base64data: string = await new Promise((resolve, reject) => {
-        reader.onerror = reject;
-        reader.onload = () => resolve(reader.result as string);
-        reader.readAsDataURL(blob);
-      });
+      let base64data = null;
+      if (profileImage) {
+        try {
+          const response = await fetch(profileImage);
+          const blob = await response.blob();
+          base64data = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = reject;
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+          });
+        } catch (e) {
+          console.log('Image conversion bypassed');
+        }
+      }
 
       await setDoc(doc(db, 'users', user.uid), {
-        fullName,
-        mobileNumber,
-        email: email.toLowerCase().trim(),
-        dob,
+        fullName: fullName || 'Player',
+        mobileNumber: mobileNumber || '9999999999',
+        email: email ? email.toLowerCase().trim() : user.email || 'player@onikeri.com',
+        dob: dob || '01-01-2000',
         role: 'Player',
         photoURL: base64data,
         walletBalance: 100,
@@ -300,12 +294,13 @@ export default function MasterApp() {
       setIsProcessing(false);
       setIsGuest(false);
       setIsAdmin(false);
-      Alert.alert('Registration Complete 🎉', 'Welcome to Onikeri Premier League!');
+      Alert.alert('Success 🎉', 'Welcome to Onikeri Premier League!');
       setStep('DASHBOARD');
       setActiveTab('Home');
     } catch (err: any) {
       setIsProcessing(false);
-      Alert.alert('Verification Error', err.message);
+      setStep('DASHBOARD');
+      setActiveTab('Home');
     }
   };
 
@@ -342,9 +337,24 @@ export default function MasterApp() {
         setStep('DASHBOARD');
         setActiveTab('Home');
       } else {
+        const defaultName = cleanEmail.split('@')[0];
+        await setDoc(doc(db, 'users', user.uid), {
+          fullName: defaultName.charAt(0).toUpperCase() + defaultName.slice(1),
+          mobileNumber: '9999999999',
+          email: cleanEmail,
+          dob: '01-01-2000',
+          role: 'Player',
+          photoURL: null,
+          walletBalance: 100,
+          registeredAt: new Date().toISOString(),
+        });
+
+        setFullName(defaultName);
         setIsProcessing(false);
-        setStep('FACE_SCAN');
-        Alert.alert('Complete Setup', 'Please complete your Face Verification to enter the league.');
+        setIsGuest(false);
+        setIsAdmin(false);
+        setStep('DASHBOARD');
+        setActiveTab('Home');
       }
     } catch (err: any) {
       setIsProcessing(false);
@@ -446,7 +456,7 @@ export default function MasterApp() {
                 />
                 {!!errors.fullName && <Text style={styles.fieldError}>{errors.fullName}</Text>}
 
-                <Text style={styles.fieldLabel}>Mobile Number (Verified)</Text>
+                <Text style={styles.fieldLabel}>Mobile Number</Text>
                 <View style={[styles.phoneFieldWrap, !!errors.mobileNumber && styles.inputInvalid]}>
                   <Text style={styles.countryCodeText}>+91</Text>
                   <TextInput
@@ -458,7 +468,9 @@ export default function MasterApp() {
                     value={mobileNumber}
                     onChangeText={validateMobile}
                   />
-                  <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 10 }} />
+                  {/^[6-9]\d{9}$/.test(mobileNumber.trim()) && (
+                    <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 10 }} />
+                  )}
                 </View>
                 {!!errors.mobileNumber && <Text style={styles.fieldError}>{errors.mobileNumber}</Text>}
 
@@ -619,7 +631,7 @@ export default function MasterApp() {
           </View>
           <Text style={styles.authMainTitle}>Player Face ID Verification</Text>
           <Text style={styles.verifyDescription}>
-            Our on-device ML engine detects and verifies facial features to prevent duplicate or spoofed tournament registrations.
+            Upload your profile photo or skip to enter the league dashboard immediately.
           </Text>
 
           <TouchableOpacity style={styles.avatarDropBox} onPress={pickImage}>
@@ -634,7 +646,17 @@ export default function MasterApp() {
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.mainActionBtn} onPress={executeFaceVerification} disabled={isProcessing}>
-            {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Run AI Scan & Enter League</Text>}
+            {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Save & Enter League</Text>}
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={{ marginTop: 16, padding: 10 }} 
+            onPress={() => {
+              setStep('DASHBOARD');
+              setActiveTab('Home');
+            }}
+          >
+            <Text style={{ color: '#38BDF8', fontSize: 13, fontWeight: '700' }}>Skip Verification & Go to Dashboard ➔</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
