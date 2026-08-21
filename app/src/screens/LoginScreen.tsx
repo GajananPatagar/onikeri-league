@@ -4,77 +4,71 @@ import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
+// IMPORT NATIVE FIREBASE AUTH
+import auth from '@react-native-firebase/auth';
+
 export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminUnlock }: any) {
   const [identifier, setIdentifier] = useState('');
   const [step, setStep] = useState<'INPUT' | 'OTP' | 'ADMIN'>('INPUT');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [serverOtp, setServerOtp] = useState('');
   const [userOtp, setUserOtp] = useState('');
   const [adminPass, setAdminPass] = useState('');
+  
+  // Native Firebase Confirmation Object
+  const [confirmResult, setConfirmResult] = useState<any>(null);
 
   const handleProceed = async () => {
     const input = identifier.trim().toLowerCase();
 
-    // 1. SECRET ADMIN GATEWAY
+    // SECRET ADMIN GATEWAY
     if (input === 'admin@onikeri.com') {
       setStep('ADMIN');
       return;
     }
 
-    // 2. PLAYER MOBILE GATEWAY
     if (!/^[6-9]\d{9}$/.test(input)) {
       return Alert.alert('Invalid', 'Enter a valid 10-digit mobile number.');
     }
 
     setIsProcessing(true);
-    // Generate a secure 6-digit OTP
-    const generatedToken = Math.floor(100000 + Math.random() * 900000).toString();
-    setServerOtp(generatedToken);
-
     try {
-      // REAL SMS DISPATCH (Build-Safe REST API)
-      // Go to fast2sms.com, create a free account, and paste your API key here:
-      const apiKey = 'YOUR_FAST2SMS_API_KEY'; 
+      // OFFICIAL NATIVE FIREBASE OTP REQUEST
+      const confirmation = await auth().signInWithPhoneNumber(`+91${input}`);
+      setConfirmResult(confirmation);
       
-      if (apiKey !== 'YOUR_FAST2SMS_API_KEY') {
-        await fetch(`https://www.fast2sms.com/dev/bulkV2?authorization=${apiKey}&route=dlt&sender_id=ONIKER&message=163737&variables_values=${generatedToken}&flash=0&numbers=${input}`);
-      } else {
-        // Fallback for development testing
-        console.log(`[SYS] OTP dispatched to ${input}: ${generatedToken}`);
-      }
-
       setIsProcessing(false);
       setStep('OTP');
-      Alert.alert('OTP Dispatched 📲', `A secure verification code was sent to +91 ${input}.`);
-    } catch (err) {
+      Alert.alert('OTP Sent 📲', 'Firebase has dispatched a secure 6-digit OTP to your mobile.');
+    } catch (err: any) {
       setIsProcessing(false);
-      Alert.alert('Network Error', 'Failed to communicate with SMS server.');
+      // Firebase throws specific errors if SHA-1 is missing or daily quota is exceeded
+      Alert.alert('Firebase Error', err.message || 'Failed to send OTP. Ensure your SHA-1/SHA-256 keys are in the Firebase Console.');
     }
   };
 
   const handleVerifyOtp = async () => {
-    // 123456 is a developer bypass so you can test before adding your API key
-    if (userOtp !== serverOtp && userOtp !== '123456') { 
-      return Alert.alert('Invalid OTP', 'The verification code is incorrect.');
+    if (userOtp.length !== 6) {
+      return Alert.alert('Invalid OTP', 'Firebase verification codes must be 6 digits long.');
     }
 
     setIsProcessing(true);
-    
-    // Create a deterministic UID based on the mobile number
-    const uid = `user_${identifier}`;
-    
     try {
+      // VERIFY FIREBASE NATIVE OTP
+      const userCredential = await confirmResult.confirm(userOtp);
+      const uid = userCredential.user.uid; 
+      
+      // CHECK IF USER COMPLETED PROFILE
       const userDoc = await getDoc(doc(db, 'users', uid));
-      if (userDoc.exists() && userDoc.data().photoURL && userDoc.data().fullName) {
+      if (userDoc.exists() && userDoc.data()?.photoURL && userDoc.data()?.fullName) {
         onLoginSuccess(userDoc.data());
       } else {
-        // Force new user to setup profile
+        // Force new user to setup profile with their new Secure UID
         onRequireProfile({ mobile: identifier, uid: uid });
       }
-    } catch (e) {
-      Alert.alert('Database Error', 'Could not verify user profile.');
+    } catch (e: any) {
+      setIsProcessing(false);
+      Alert.alert('Verification Failed', 'The OTP entered is incorrect or expired.');
     }
-    setIsProcessing(false);
   };
 
   return (
@@ -87,14 +81,14 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
           <Text style={styles.label}>Mobile Number</Text>
           <TextInput style={styles.input} keyboardType="number-pad" placeholder="10-digit number" placeholderTextColor="#475569" autoCapitalize="none" value={identifier} onChangeText={setIdentifier} />
           <TouchableOpacity style={styles.btn} onPress={handleProceed} disabled={isProcessing}>
-            {isProcessing ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Send OTP Verification</Text>}
+            {isProcessing ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Send Firebase OTP</Text>}
           </TouchableOpacity>
         </View>
       )}
 
       {step === 'OTP' && (
         <View style={styles.card}>
-          <Text style={styles.label}>Enter 6-Digit SMS OTP</Text>
+          <Text style={styles.label}>Enter 6-Digit OTP</Text>
           <TextInput style={[styles.input, { textAlign: 'center', fontSize: 24, letterSpacing: 8 }]} keyboardType="number-pad" maxLength={6} value={userOtp} onChangeText={setUserOtp} />
           <TouchableOpacity style={styles.btn} onPress={handleVerifyOtp} disabled={isProcessing}>
             {isProcessing ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Verify Identity</Text>}

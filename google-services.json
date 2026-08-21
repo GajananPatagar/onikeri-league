@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "6768887688",
+    "project_id": "onikeri-premier-league",
+    "storage_bucket": "onikeri-premier-league.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:6768887688:android:90f7f09cec8bf5c7c4dc3d",
+        "android_client_info": {
+          "package_name": "com.onikeri.league"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyApQMT3mKXhUTmr3GrZjG1U7tSbP8hMRsQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
