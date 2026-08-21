@@ -1,16 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { PhoneAuthProvider, signInWithCredential, signInWithPhoneNumber } from 'firebase/auth';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { db, auth, app } from '../config/firebase';
 
 export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminUnlock }: any) {
   const [identifier, setIdentifier] = useState('');
   const [step, setStep] = useState<'INPUT' | 'OTP' | 'ADMIN'>('INPUT');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [serverOtp, setServerOtp] = useState('');
   const [userOtp, setUserOtp] = useState('');
   const [adminPass, setAdminPass] = useState('');
+  
+  // Firebase Phone Auth States
+  const [verificationId, setVerificationId] = useState('');
+  const recaptchaVerifier = useRef(null);
 
   const handleProceed = async () => {
     const input = identifier.trim().toLowerCase();
@@ -27,63 +32,73 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
     }
 
     setIsProcessing(true);
-    const generatedToken = Math.floor(1000 + Math.random() * 9000).toString();
-    setServerOtp(generatedToken);
-
     try {
-      // REAL SMS DISPATCH
-      // Action: Replace YOUR_API_KEY with your Fast2SMS DLT approved key
-      await fetch(`https://www.fast2sms.com/dev/bulkV2?authorization=YOUR_API_KEY&route=dlt&sender_id=ONIKER&message=163737&variables_values=${generatedToken}&flash=0&numbers=${input}`);
+      // REAL FIREBASE NATIVE OTP DISPATCH
+      const phoneNumber = `+91${input}`;
+      const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier.current);
       
-      console.log(`[SYS] OTP dispatched to ${input}: ${generatedToken}`); // Fallback log for terminal testing
+      setVerificationId(confirmationResult.verificationId);
       setIsProcessing(false);
       setStep('OTP');
-    } catch (err) {
+      Alert.alert('OTP Sent 📲', 'Firebase has dispatched a secure 6-digit OTP to your mobile.');
+    } catch (err: any) {
       setIsProcessing(false);
-      Alert.alert('Network Error', 'Failed to communicate with SMS server.');
+      Alert.alert('Firebase Error', err.message);
     }
   };
 
   const handleVerifyOtp = async () => {
-    if (userOtp !== serverOtp && userOtp !== '1234') { // 1234 kept strictly for your dev bypassing if API fails
-      return Alert.alert('Invalid OTP', 'The code is incorrect.');
+    if (userOtp.length !== 6) {
+      return Alert.alert('Invalid OTP', 'Firebase verification codes are 6 digits long.');
     }
 
     setIsProcessing(true);
-    const uid = `user_${identifier}`;
-    
     try {
+      // VERIFY FIREBASE CREDENTIALS
+      const credential = PhoneAuthProvider.credential(verificationId, userOtp);
+      const userCredential = await signInWithCredential(auth, credential);
+      const uid = userCredential.user.uid; // This generates a highly secure Firebase Auth UID
+      
+      // CHECK IF USER COMPLETED PROFILE
       const userDoc = await getDoc(doc(db, 'users', uid));
       if (userDoc.exists() && userDoc.data().photoURL && userDoc.data().fullName) {
         onLoginSuccess(userDoc.data());
       } else {
-        onRequireProfile(identifier);
+        // Force new user to setup profile with their new Secure UID
+        onRequireProfile({ mobile: identifier, uid: uid });
       }
-    } catch (e) {
-      Alert.alert('Database Error', 'Could not verify user.');
+    } catch (e: any) {
+      setIsProcessing(false);
+      Alert.alert('Verification Failed', 'The OTP entered is incorrect or expired.');
     }
-    setIsProcessing(false);
   };
 
   return (
     <View style={styles.container}>
+      {/* BACKGROUND RECAPTCHA FOR FIREBASE SECURITY */}
+      <FirebaseRecaptchaVerifierModal
+        ref={recaptchaVerifier}
+        firebaseConfig={app.options}
+        attemptInvisibleVerification={false} 
+      />
+
       <MaterialCommunityIcons name="cricket" size={54} color="#38BDF8" style={{ marginBottom: 20 }} />
       <Text style={styles.title}>Onikeri Premier League</Text>
       
       {step === 'INPUT' && (
         <View style={styles.card}>
           <Text style={styles.label}>Mobile Number</Text>
-          <TextInput style={styles.input} keyboardType="default" placeholder="10-digit number" placeholderTextColor="#475569" autoCapitalize="none" value={identifier} onChangeText={setIdentifier} />
+          <TextInput style={styles.input} keyboardType="number-pad" placeholder="10-digit number" placeholderTextColor="#475569" autoCapitalize="none" value={identifier} onChangeText={setIdentifier} />
           <TouchableOpacity style={styles.btn} onPress={handleProceed} disabled={isProcessing}>
-            {isProcessing ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Proceed</Text>}
+            {isProcessing ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Send Firebase OTP</Text>}
           </TouchableOpacity>
         </View>
       )}
 
       {step === 'OTP' && (
         <View style={styles.card}>
-          <Text style={styles.label}>Enter SMS OTP</Text>
-          <TextInput style={[styles.input, { textAlign: 'center', fontSize: 24, letterSpacing: 8 }]} keyboardType="number-pad" maxLength={4} value={userOtp} onChangeText={setUserOtp} />
+          <Text style={styles.label}>Enter 6-Digit OTP</Text>
+          <TextInput style={[styles.input, { textAlign: 'center', fontSize: 24, letterSpacing: 8 }]} keyboardType="number-pad" maxLength={6} value={userOtp} onChangeText={setUserOtp} />
           <TouchableOpacity style={styles.btn} onPress={handleVerifyOtp} disabled={isProcessing}>
             {isProcessing ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Verify Identity</Text>}
           </TouchableOpacity>
@@ -115,3 +130,4 @@ const styles = StyleSheet.create({
   btn: { backgroundColor: '#0284C7', padding: 14, borderRadius: 10, alignItems: 'center' },
   btnText: { color: '#fff', fontWeight: '800' }
 });
+

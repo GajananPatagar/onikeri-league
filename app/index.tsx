@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, StatusBar } from 'react-native';
+import { View, StyleSheet, StatusBar, Text } from 'react-native';
 import LoginScreen from './src/screens/LoginScreen';
 import ProfileSetupScreen from './src/screens/ProfileSetupScreen';
-import DashboardScreen from './src/screens/DashboardScreen'; // We will inline the Dashboard layout logic here for immediate entry
+// Keep your other imports here...
 
 export default function App() {
   const [authState, setAuthState] = useState<'LOGIN' | 'SETUP' | 'DASHBOARD'>('LOGIN');
   const [user, setUser] = useState<any>(null);
-  const [tempMobile, setTempMobile] = useState('');
+  
+  // This now holds both the Mobile Number AND the secure Firebase UID
+  const [authData, setAuthData] = useState<{mobile: string, uid: string} | null>(null);
 
   if (authState === 'LOGIN') {
     return (
@@ -15,7 +17,7 @@ export default function App() {
         <StatusBar barStyle="light-content" backgroundColor="#090D16" />
         <LoginScreen 
           onLoginSuccess={(userData: any) => { setUser(userData); setAuthState('DASHBOARD'); }}
-          onRequireProfile={(mobile: string) => { setTempMobile(mobile); setAuthState('SETUP'); }}
+          onRequireProfile={(data: any) => { setAuthData(data); setAuthState('SETUP'); }}
           onAdminUnlock={() => { setUser({ role: 'SuperAdmin', fullName: 'SuperAdmin' }); setAuthState('DASHBOARD'); }}
         />
       </View>
@@ -26,19 +28,17 @@ export default function App() {
     return (
       <View style={styles.container}>
         <ProfileSetupScreen 
-          mobileNumber={tempMobile} 
+          authData={authData} 
           onSetupComplete={(userData: any) => { setUser(userData); setAuthState('DASHBOARD'); }} 
         />
       </View>
     );
   }
 
-  // To keep the file manageable, import the remaining Dashboard view here
-  // (In your actual codebase, move the large Dashboard return block into app/src/screens/DashboardScreen.tsx)
   return (
     <View style={styles.container}>
-      <Text style={{color: '#fff', alignSelf: 'center', marginTop: 100}}>Welcome to Dashboard</Text>
-      {/* Import your existing Dashboard Layout Code here. For modularity, connect AdminMatrix and RazorpayWallet components into it! */}
+       {/* YOUR DASHBOARD REMAINS HERE */}
+       <Text style={{color: '#fff', marginTop: 100, textAlign: 'center'}}>Dashboard Loaded!</Text>
     </View>
   );
 }
