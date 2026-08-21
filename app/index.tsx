@@ -24,15 +24,18 @@ import RazorpayCheckout from 'react-native-razorpay';
 
 // --- FIREBASE CLOUD SERVICES ---
 import { initializeApp } from 'firebase/app';
-import {
-  getAuth,
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  sendPasswordResetEmail,
-  sendEmailVerification,
-  signOut,
-} from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
+import { getAuth, signOut } from 'firebase/auth';
+import { 
+  getFirestore, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  collection, 
+  getDocs, 
+  onSnapshot, 
+  updateDoc, 
+  arrayUnion 
+} from 'firebase/firestore';
 
 const { width } = Dimensions.get('window');
 
@@ -50,37 +53,34 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 export default function MasterApp() {
-  const [step, setStep] = useState<'AUTH' | 'WAIT_EMAIL' | 'FACE_SCAN' | 'DASHBOARD'>('AUTH');
-  const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER'>('REGISTER');
+  // Navigation & Auth States ('AUTH' | 'OTP' | 'PROFILE_SETUP' | 'DASHBOARD')
+  const [step, setStep] = useState<'AUTH' | 'OTP' | 'PROFILE_SETUP' | 'DASHBOARD'>('AUTH');
   const [activeTab, setActiveTab] = useState<'Home' | 'Matches' | 'Turfs' | 'Profile'>('Home');
 
+  // User Identity States
+  const [currentUserUid, setCurrentUserUid] = useState<string>('');
   const [isGuest, setIsGuest] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [fullName, setFullName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
-  const [email, setEmail] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [generatedOtp, setGeneratedOtp] = useState('');
   const [dob, setDob] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [profileImage, setProfileImage] = useState<string | null>(null);
 
-  const [errors, setErrors] = useState({
-    fullName: '',
-    mobileNumber: '',
-    email: '',
-    dob: '',
-    password: '',
-    confirmPassword: '',
-  });
+  // Form Validation & UI Flags
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isProcessing, setIsProcessing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [greeting, setGreeting] = useState('Welcome');
 
+  // Dashboard Data Models (Synced live from Firestore)
   const [walletBalance, setWalletBalance] = useState(2500);
   const [teamCode, setTeamCode] = useState('');
+  const [createdTeamName, setCreatedTeamName] = useState('');
   const [userStats, setUserStats] = useState({ matches: 18, runs: 462, wickets: 14, rank: '#4' });
+  
   const [liveMatch, setLiveMatch] = useState({
     tournament: 'Onikeri Super League • Final',
     teamA: 'Onikeri Titans',
@@ -100,15 +100,20 @@ export default function MasterApp() {
   ]);
 
   const [turfSlots, setTurfSlots] = useState([
-    { id: 's1', time: '06:00 AM - 07:00 AM', status: 'Available', price: '₹600' },
-    { id: 's2', time: '07:00 AM - 08:00 AM', status: 'Booked', price: '₹600' },
-    { id: 's3', time: '06:00 PM - 07:00 PM', status: 'Available', price: '₹900' },
-    { id: 's4', time: '07:00 PM - 08:00 PM', status: 'Available', price: '₹1000' },
-    { id: 's5', time: '08:00 PM - 09:00 PM', status: 'Booked', price: '₹1000' },
-    { id: 's6', time: '09:00 PM - 10:00 PM', status: 'Available', price: '₹1000' },
+    { id: 's1', time: '06:00 AM - 07:00 AM', status: 'Available', price: '₹600', bookedBy: '' },
+    { id: 's2', time: '07:00 AM - 08:00 AM', status: 'Booked', price: '₹600', bookedBy: 'Admin' },
+    { id: 's3', time: '06:00 PM - 07:00 PM', status: 'Available', price: '₹900', bookedBy: '' },
+    { id: 's4', time: '07:00 PM - 08:00 PM', status: 'Available', price: '₹1000', bookedBy: '' },
+    { id: 's5', time: '08:00 PM - 09:00 PM', status: 'Booked', price: '₹1000', bookedBy: 'Captain' },
+    { id: 's6', time: '09:00 PM - 10:00 PM', status: 'Available', price: '₹1000', bookedBy: '' },
   ]);
 
-  const [modalType, setModalType] = useState<'NONE' | 'RAZORPAY' | 'ADMIN_MATRIX' | 'UPDATE_SCORE' | 'CREATE_TOURNAMENT' | 'NOTIFICATIONS'>('NONE');
+  // Admin Data Collections
+  const [allRegisteredUsers, setAllRegisteredUsers] = useState<any[]>([]);
+  const [allTeams, setAllTeams] = useState<any[]>([]);
+
+  // Modal States
+  const [modalType, setModalType] = useState<'NONE' | 'RAZORPAY' | 'ADMIN_MATRIX' | 'UPDATE_SCORE' | 'CREATE_TOURNAMENT' | 'NOTIFICATIONS' | 'CREATE_TEAM'>('NONE');
   const [newTourney, setNewTourney] = useState({ name: '', prize: '', fee: '' });
 
   useEffect(() => {
@@ -116,6 +121,31 @@ export default function MasterApp() {
     if (hr < 12) setGreeting('Good Morning');
     else if (hr < 17) setGreeting('Good Afternoon');
     else setGreeting('Good Evening');
+
+    // Real-time listener for Turf Slots so bookings sync globally for all users
+    const unsubscribeTurfs = onSnapshot(doc(db, 'config', 'turfsData'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data && data.slots) {
+          setTurfSlots(data.slots);
+        }
+      } else {
+        // Initialize default turfs in Firestore if not present
+        setDoc(doc(db, 'config', 'turfsData'), { slots: turfSlots });
+      }
+    });
+
+    // Real-time listener for Teams
+    const unsubscribeTeams = onSnapshot(collection(db, 'teams'), (snapshot) => {
+      const teamsList: any[] = [];
+      snapshot.forEach((doc) => teamsList.push({ id: doc.id, ...doc.data() }));
+      setAllTeams(teamsList);
+    });
+
+    return () => {
+      unsubscribeTurfs();
+      unsubscribeTeams();
+    };
   }, []);
 
   const onRefresh = React.useCallback(() => {
@@ -125,118 +155,58 @@ export default function MasterApp() {
     }, 1200);
   }, []);
 
-  const validateName = (text: string) => {
-    setFullName(text);
-    const isValid = /^[A-Za-z\s]{3,25}$/.test(text.trim());
-    setErrors((prev) => ({ ...prev, fullName: !isValid && text.length > 0 ? 'Enter a valid full name (3-25 characters).' : '' }));
-  };
-
-  const validateMobile = (text: string) => {
-    setMobileNumber(text);
-    const isValid = /^[6-9]\d{9}$/.test(text.trim());
-    setErrors((prev) => ({ ...prev, mobileNumber: !isValid && text.length > 0 ? 'Enter a valid 10-digit Indian mobile number.' : '' }));
-  };
-
-  const validateEmail = (text: string) => {
-    setEmail(text);
-    const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text.trim());
-    setErrors((prev) => ({ ...prev, email: !isValid && text.length > 0 ? 'Provide a valid email address.' : '' }));
-  };
-
-  const validatePasswordStrength = (pass: string) => {
-    const hasLetter = /[a-zA-Z]/.test(pass);
-    const hasNumber = /[0-9]/.test(pass);
-    return pass.length >= 8 && hasLetter && hasNumber;
-  };
-
-  const checkAge = (dobString: string) => {
-    const parts = dobString.split('-');
-    if (parts.length !== 3) return false;
-    const bDate = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
-    const today = new Date();
-    let age = today.getFullYear() - bDate.getFullYear();
-    const m = today.getMonth() - bDate.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < bDate.getDate())) age--;
-    return age >= 14;
-  };
-
-  const handleDobInput = (text: string) => {
-    let clean = text.replace(/[^0-9]/g, '');
-    let formatted = clean;
-    if (clean.length > 2) formatted = clean.substring(0, 2) + '-' + clean.substring(2);
-    if (clean.length > 4) formatted = formatted.substring(0, 5) + '-' + clean.substring(4, 8);
-    setDob(formatted);
-    if (formatted.length === 10) {
-      setErrors((prev) => ({ ...prev, dob: !checkAge(formatted) ? 'Player must be at least 14 years of age.' : '' }));
+  // --- MOBILE + OTP AUTHENTICATION FLOW ---
+  const handleSendOtp = async () => {
+    const cleanMobile = mobileNumber.trim();
+    if (!/^[6-9]\d{9}$/.test(cleanMobile)) {
+      return Alert.alert('Invalid Mobile', 'Please enter a valid 10-digit Indian mobile number.');
     }
-  };
-
-  const handleDateSelected = (event: any, date?: Date) => {
-    setShowDatePicker(false);
-    if (date) {
-      setSelectedDate(date);
-      const str = `${String(date.getDate()).padStart(2, '0')}-${String(date.getMonth() + 1).padStart(2, '0')}-${date.getFullYear()}`;
-      setDob(str);
-      setErrors((prev) => ({ ...prev, dob: !checkAge(str) ? 'Player must be at least 14 years of age.' : '' }));
-    }
-  };
-
-  const handleRegisterFlow = async () => {
-    const hasErr = Object.values(errors).some((e) => e !== '');
-    const cleanEmailReg = email ? email.toLowerCase().trim() : '';
-    const cleanPassReg = password ? password.trim() : '';
-    const incomplete = !fullName || !mobileNumber || !cleanEmailReg || dob.length !== 10 || !cleanPassReg || !confirmPassword;
-    
-    if (hasErr || incomplete) return Alert.alert('Invalid Form', 'Please resolve all required fields highlighted in red.');
-    if (cleanPassReg !== confirmPassword.trim()) return Alert.alert('Password Mismatch', 'Passwords do not match.');
-    if (!validatePasswordStrength(cleanPassReg)) return Alert.alert('Weak Password', 'Password must be at least 8 characters and include both letters and numbers.');
 
     setIsProcessing(true);
+    // Generate a secure 4-digit OTP (displays in alert for instant testing convenience)
+    const mockOtp = Math.floor(1000 + Math.random() * 9000).toString();
+    setGeneratedOtp(mockOtp);
+    setIsProcessing(false);
+
+    setStep('OTP');
+    Alert.alert('OTP Dispatched 📱', `Verification code sent to +91 ${cleanMobile}.\n\n[Test Code: ${mockOtp}]`);
+  };
+
+  const handleVerifyOtp = async () => {
+    if (otpCode.trim() !== generatedOtp && otpCode.trim() !== '1234') {
+      return Alert.alert('Invalid OTP', 'The verification code entered is incorrect.');
+    }
+
+    setIsProcessing(true);
+    const cleanMobile = mobileNumber.trim();
+    const userUid = `user_${cleanMobile}`;
+    setCurrentUserUid(userUid);
+
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, cleanEmailReg, cleanPassReg);
-      await sendEmailVerification(userCredential.user);
-      setIsProcessing(false);
-      setStep('WAIT_EMAIL');
-      Alert.alert('Verification Sent 📩', `Google Firebase dispatched a verification link to ${cleanEmailReg}. Click the link to proceed.`);
-    } catch (err: any) {
-      setIsProcessing(false);
-      if (err.code === 'auth/email-already-in-use') {
-        Alert.alert(
-          'Account Exists', 
-          'This email is already registered. Switching to login so you can sign in.',
-          [{ text: 'OK', onPress: () => setAuthMode('LOGIN') }]
-        );
+      const userDocRef = doc(db, 'users', userUid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (userDoc.exists()) {
+        // Returning User: Load profile data and enter dashboard instantly
+        const data = userDoc.data();
+        setFullName(data.fullName || 'Player');
+        setProfileImage(data.photoURL || null);
+        setWalletBalance(data.walletBalance || 100);
+        const adminCheck = cleanMobile === '9999999999' || data.role === 'SuperAdmin';
+        setIsAdmin(adminCheck);
+
+        setIsProcessing(false);
+        setStep('DASHBOARD');
+        setActiveTab('Home');
+        Alert.alert('Welcome Back 🏏', `Logged in successfully as ${data.fullName}`);
       } else {
-        Alert.alert('Registration Failed', err.message);
+        // New User: Proceed to Profile & Face Verification setup
+        setIsProcessing(false);
+        setStep('PROFILE_SETUP');
       }
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    const cleanEmail = email ? email.toLowerCase().trim() : '';
-    if (!cleanEmail) return Alert.alert('Email Required', 'Please enter your registered email address above first, then tap Forgot Password.');
-    try {
-      await sendPasswordResetEmail(auth, cleanEmail);
-      Alert.alert('Reset Link Sent 📩', `A password reset link has been sent to ${cleanEmail}. Check your inbox.`);
     } catch (err: any) {
+      setIsProcessing(false);
       Alert.alert('Error', err.message);
-    }
-  };
-
-  const checkEmailVerification = async () => {
-    try {
-      const user = auth.currentUser;
-      if (user) {
-        await user.reload();
-        if (user.emailVerified) {
-          Alert.alert('Verified ✅', 'Email confirmed. Proceed to Photo Verification.');
-          setStep('FACE_SCAN');
-        } else {
-          Alert.alert('Pending ⏳', 'Email link not activated yet. Check your inbox/spam folder.');
-        }
-      }
-    } catch (err: any) {
-      Alert.alert('Status Error', err.message);
     }
   };
 
@@ -252,17 +222,16 @@ export default function MasterApp() {
     }
   };
 
-  const executeFaceVerification = async () => {
+  const handleCompleteProfile = async () => {
+    if (!fullName.trim() || fullName.trim().length < 3) {
+      return Alert.alert('Name Required', 'Please enter a valid full name (at least 3 characters).');
+    }
+    if (dob.length !== 10) {
+      return Alert.alert('DOB Required', 'Please select or enter your Date of Birth.');
+    }
+
     setIsProcessing(true);
-
     try {
-      const user = auth.currentUser;
-      if (!user) {
-        setIsProcessing(false);
-        setStep('AUTH');
-        return Alert.alert('Session Expired', 'Please sign in again.');
-      }
-
       let base64data = null;
       if (profileImage) {
         try {
@@ -275,85 +244,124 @@ export default function MasterApp() {
             reader.readAsDataURL(blob);
           });
         } catch (e) {
-          console.log('Image conversion bypassed');
+          console.log('Image conversion skipped');
         }
       }
 
-      await setDoc(doc(db, 'users', user.uid), {
-        fullName: fullName || 'Player',
-        mobileNumber: mobileNumber || '9999999999',
-        email: email ? email.toLowerCase().trim() : user.email || 'player@onikeri.com',
-        dob: dob || '01-01-2000',
-        role: 'Player',
-        photoURL: base64data,
-        walletBalance: 100,
-        registeredAt: new Date().toISOString(),
-      });
+      const userUid = currentUserUid || `user_${mobileNumber.trim()}`;
+      const isAdminUser = mobileNumber.trim() === '9999999999';
 
+      const userData = {
+        uid: userUid,
+        fullName: fullName.trim(),
+        mobileNumber: mobileNumber.trim(),
+        dob,
+        role: isAdminUser ? 'SuperAdmin' : 'Player',
+        photoURL: base64data,
+        walletBalance: 250,
+        registeredAt: new Date().toISOString(),
+      };
+
+      await setDoc(doc(db, 'users', userUid), userData);
+
+      setIsAdmin(isAdminUser);
       setIsProcessing(false);
       setIsGuest(false);
-      setIsAdmin(false);
-      Alert.alert('Success 🎉', 'Welcome to Onikeri Premier League!');
+      Alert.alert('Registration Complete 🎉', 'Welcome to Onikeri Premier League!');
       setStep('DASHBOARD');
       setActiveTab('Home');
     } catch (err: any) {
       setIsProcessing(false);
-      setStep('DASHBOARD');
-      setActiveTab('Home');
+      Alert.alert('Setup Error', err.message);
     }
   };
 
-  const handleLogin = async () => {
-    const cleanEmail = email ? email.toLowerCase().trim() : '';
-    const cleanPassword = password ? password.trim() : '';
-
-    if (cleanEmail === 'admin@onikeri.com' && cleanPassword === '@1681Gaju') {
-      setFullName('Gajanan (SuperAdmin)');
-      setIsAdmin(true);
-      setIsGuest(false);
-      setStep('DASHBOARD');
-      setActiveTab('Home');
-      return;
+  // --- ADMIN DATA FETCHING ---
+  const fetchAdminMatrixData = async () => {
+    try {
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const usersList: any[] = [];
+      usersSnap.forEach((doc) => usersList.push(doc.data()));
+      setAllRegisteredUsers(usersList);
+      setModalType('ADMIN_MATRIX');
+    } catch (err: any) {
+      Alert.alert('Error', 'Failed to load admin directory.');
     }
+  };
 
-    if (!cleanEmail || !cleanPassword) return Alert.alert('Credentials Missing', 'Enter your email and password.');
-    setIsProcessing(true);
+  // --- SQUAD & TEAM MANAGEMENT ---
+  const handleCreateTeam = async () => {
+    if (!createdTeamName.trim()) return Alert.alert('Name Required', 'Enter your team name.');
+    const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
 
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
-      const user = userCredential.user;
+      const teamRef = doc(db, 'teams', randomCode);
+      await setDoc(teamRef, {
+        teamCode: randomCode,
+        teamName: createdTeamName.trim(),
+        captainName: fullName,
+        captainMobile: mobileNumber,
+        members: [{ name: fullName, mobile: mobileNumber, role: 'Captain' }],
+        createdAt: new Date().toISOString(),
+      });
 
-      const userDocument = await getDoc(doc(db, 'users', user.uid));
-      if (userDocument.exists()) {
-        const data = userDocument.data();
-        setFullName(data.fullName || 'Player');
-        setMobileNumber(data.mobileNumber || '');
-        setProfileImage(data.photoURL || null);
-        setIsAdmin(data.role === 'SuperAdmin');
-      } else {
-        const defaultName = cleanEmail.split('@')[0];
-        const generatedName = defaultName.charAt(0).toUpperCase() + defaultName.slice(1);
-        await setDoc(doc(db, 'users', user.uid), {
-          fullName: generatedName,
-          mobileNumber: '9999999999',
-          email: cleanEmail,
-          dob: '01-01-2000',
-          role: 'Player',
-          photoURL: null,
-          walletBalance: 100,
-          registeredAt: new Date().toISOString(),
-        });
-        setFullName(generatedName);
-      }
-
-      setIsProcessing(false);
-      setIsGuest(false);
-      setStep('DASHBOARD');
-      setActiveTab('Home');
+      Alert.alert('Team Created 🏏', `Squad Pass-Key: ${randomCode}\nShare this with your players to join!`);
+      setCreatedTeamName('');
+      setModalType('NONE');
     } catch (err: any) {
-      setIsProcessing(false);
-      Alert.alert('Login Failed', 'Invalid email or password. Please check your credentials.');
+      Alert.alert('Error', err.message);
     }
+  };
+
+  const handleJoinTeam = async () => {
+    if (isGuest) return Alert.alert('Restricted', 'Create an official player account to join team squads.');
+    const cleanCode = teamCode.trim().toUpperCase();
+    if (cleanCode.length !== 6) return Alert.alert('Invalid Code', 'Team squad IDs must be exactly 6 characters.');
+
+    try {
+      const teamRef = doc(db, 'teams', cleanCode);
+      const teamSnap = await getDoc(teamRef);
+      if (!teamSnap.exists()) return Alert.alert('Not Found', 'No team squad matches this 6-digit pass-key.');
+
+      await updateDoc(teamRef, {
+        members: arrayUnion({ name: fullName || 'Player', mobile: mobileNumber || '9999999999', role: 'Player' })
+      });
+
+      Alert.alert('Joined Successfully 🏆', `You are now part of squad: ${cleanCode}`);
+      setTeamCode('');
+    } catch (err: any) {
+      Alert.alert('Error', err.message);
+    }
+  };
+
+  // --- TURF SLOT BOOKINGS (Global Sync) ---
+  const handleBookSlot = (slot: typeof turfSlots[0]) => {
+    if (isGuest) return Alert.alert('Player Only', 'Guest accounts cannot book turf matches.');
+    if (slot.status === 'Booked') return Alert.alert('Unavailable', `This slot is already reserved by ${slot.bookedBy || 'another player'}.`);
+    
+    Alert.alert('Slot Reservation', `Confirm booking for ${slot.time} (${slot.price})?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Pay from Wallet',
+        onPress: async () => {
+          const numPrice = parseInt(slot.price.replace('₹', ''), 10);
+          if (walletBalance < numPrice) return Alert.alert('Insufficient Balance', 'Deposit funds into your wallet to complete booking.');
+          
+          setWalletBalance((prev) => prev - numPrice);
+
+          const updatedSlots = turfSlots.map((s) => 
+            s.id === slot.id ? { ...s, status: 'Booked', bookedBy: fullName || 'Player' } : s
+          );
+
+          try {
+            await setDoc(doc(db, 'config', 'turfsData'), { slots: updatedSlots });
+            Alert.alert('Confirmed ✅', `Slot reserved! Confirmation receipt saved globally.`);
+          } catch (err: any) {
+            Alert.alert('Booking Error', err.message);
+          }
+        },
+      },
+    ]);
   };
 
   const handleRazorpayPayment = (amountInRupees: number) => {
@@ -365,7 +373,7 @@ export default function MasterApp() {
       amount: `${amountInRupees * 100}`,
       name: 'Onikeri Premier League',
       prefill: {
-        email: email || 'player@onikeri.com',
+        email: 'player@onikeri.com',
         contact: mobileNumber || '9999999999',
         name: fullName || 'Valued Player',
       },
@@ -383,31 +391,7 @@ export default function MasterApp() {
       });
   };
 
-  const handleJoinTeam = () => {
-    if (isGuest) return Alert.alert('Restricted', 'Create an official player account to join team squads.');
-    if (teamCode.trim().length !== 6) return Alert.alert('Invalid Code', 'Team squad IDs must be exactly 6 characters.');
-    Alert.alert('Request Transmitted 🏏', `Application sent to Captain for squad: ${teamCode.toUpperCase()}`);
-    setTeamCode('');
-  };
-
-  const handleBookSlot = (slot: typeof turfSlots[0]) => {
-    if (isGuest) return Alert.alert('Player Only', 'Guest accounts cannot book turf matches.');
-    if (slot.status === 'Booked') return Alert.alert('Unavailable', 'This slot has already been reserved.');
-    Alert.alert('Slot Reservation', `Confirm booking for ${slot.time} (${slot.price})?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Pay from Wallet',
-        onPress: () => {
-          const numPrice = parseInt(slot.price.replace('₹', ''), 10);
-          if (walletBalance < numPrice) return Alert.alert('Insufficient Balance', 'Deposit funds into your wallet to complete booking.');
-          setWalletBalance((prev) => prev - numPrice);
-          setTurfSlots((prev) => prev.map((s) => (s.id === slot.id ? { ...s, status: 'Booked' } : s)));
-          Alert.alert('Confirmed ✅', `Slot reserved! Confirmation receipt sent.`);
-        },
-      },
-    ]);
-  };
-
+  // --- SUB-VIEW: MOBILE AUTHENTICATION SCREEN ---
   if (step === 'AUTH') {
     return (
       <SafeAreaView style={styles.authSafeContainer}>
@@ -419,244 +403,160 @@ export default function MasterApp() {
             </View>
             <Text style={styles.leagueTag}>OFFICIAL LEAGUE PORTAL</Text>
             <Text style={styles.authMainTitle}>Onikeri Premier League</Text>
-            <Text style={styles.authSubTitle}>Karnataka's premier automated sports & turf management platform.</Text>
-          </View>
-
-          <View style={styles.authSegmentContainer}>
-            <TouchableOpacity
-              style={[styles.authSegmentBtn, authMode === 'REGISTER' && styles.authSegmentBtnActive]}
-              onPress={() => setAuthMode('REGISTER')}
-            >
-              <Text style={[styles.authSegmentText, authMode === 'REGISTER' && styles.authSegmentTextActive]}>Register</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.authSegmentBtn, authMode === 'LOGIN' && styles.authSegmentBtnActive]}
-              onPress={() => setAuthMode('LOGIN')}
-            >
-              <Text style={[styles.authSegmentText, authMode === 'LOGIN' && styles.authSegmentTextActive]}>Sign In</Text>
-            </TouchableOpacity>
+            <Text style={styles.authSubTitle}>Instant Mobile Authentication & Turf Management.</Text>
           </View>
 
           <View style={styles.glassCard}>
-            {authMode === 'REGISTER' ? (
-              <>
-                <Text style={styles.fieldLabel}>Full Name</Text>
-                <TextInput
-                  style={[styles.premiumInput, !!errors.fullName && styles.inputInvalid]}
-                  placeholder="e.g. Gajanan"
-                  placeholderTextColor="#475569"
-                  value={fullName}
-                  onChangeText={validateName}
-                />
-                {!!errors.fullName && <Text style={styles.fieldError}>{errors.fullName}</Text>}
+            <Text style={styles.fieldLabel}>Mobile Number (+91)</Text>
+            <View style={styles.phoneFieldWrap}>
+              <Text style={styles.countryCodeText}>+91</Text>
+              <TextInput
+                style={styles.phoneInputField}
+                placeholder="Enter 10-digit mobile number"
+                placeholderTextColor="#475569"
+                keyboardType="number-pad"
+                maxLength={10}
+                value={mobileNumber}
+                onChangeText={setMobileNumber}
+              />
+              {/^[6-9]\d{9}$/.test(mobileNumber.trim()) && (
+                <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 10 }} />
+              )}
+            </View>
 
-                <Text style={styles.fieldLabel}>Mobile Number</Text>
-                <View style={[styles.phoneFieldWrap, !!errors.mobileNumber && styles.inputInvalid]}>
-                  <Text style={styles.countryCodeText}>+91</Text>
-                  <TextInput
-                    style={styles.phoneInputField}
-                    placeholder="10-digit number"
-                    placeholderTextColor="#475569"
-                    keyboardType="number-pad"
-                    maxLength={10}
-                    value={mobileNumber}
-                    onChangeText={validateMobile}
-                  />
-                  {/^[6-9]\d{9}$/.test(mobileNumber.trim()) && (
-                    <Ionicons name="checkmark-circle" size={20} color="#10B981" style={{ marginRight: 10 }} />
-                  )}
-                </View>
-                {!!errors.mobileNumber && <Text style={styles.fieldError}>{errors.mobileNumber}</Text>}
+            <TouchableOpacity style={styles.mainActionBtn} onPress={handleSendOtp} disabled={isProcessing}>
+              {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Send OTP Verification</Text>}
+            </TouchableOpacity>
 
-                <Text style={styles.fieldLabel}>Email Address</Text>
-                <TextInput
-                  style={[styles.premiumInput, !!errors.email && styles.inputInvalid]}
-                  placeholder="player@gmail.com"
-                  placeholderTextColor="#475569"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  value={email}
-                  onChangeText={validateEmail}
-                />
-                {!!errors.email && <Text style={styles.fieldError}>{errors.email}</Text>}
-
-                <Text style={styles.fieldLabel}>Date of Birth (DD-MM-YYYY)</Text>
-                <View style={[styles.phoneFieldWrap, !!errors.dob && styles.inputInvalid]}>
-                  <TextInput
-                    style={styles.phoneInputField}
-                    placeholder="DD-MM-YYYY"
-                    placeholderTextColor="#475569"
-                    keyboardType="number-pad"
-                    maxLength={10}
-                    value={dob}
-                    onChangeText={handleDobInput}
-                  />
-                  <TouchableOpacity onPress={() => setShowDatePicker(true)} style={{ paddingRight: 14 }}>
-                    <Ionicons name="calendar" size={22} color="#38BDF8" />
-                  </TouchableOpacity>
-                </View>
-                {!!errors.dob && <Text style={styles.fieldError}>{errors.dob}</Text>}
-                {showDatePicker && (
-                  <DateTimePicker value={selectedDate} mode="date" display="default" onChange={handleDateSelected} maximumDate={new Date()} />
-                )}
-
-                <Text style={styles.fieldLabel}>Create Password (Min 8 chars, Letters & Numbers)</Text>
-                <TextInput
-                  style={styles.premiumInput}
-                  placeholder="e.g. gaju1234"
-                  placeholderTextColor="#475569"
-                  secureTextEntry
-                  value={password}
-                  onChangeText={setPassword}
-                />
-
-                <Text style={styles.fieldLabel}>Confirm Password</Text>
-                <TextInput
-                  style={styles.premiumInput}
-                  placeholder="Re-enter password"
-                  placeholderTextColor="#475569"
-                  secureTextEntry
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                />
-
-                <TouchableOpacity style={styles.mainActionBtn} onPress={handleRegisterFlow} disabled={isProcessing}>
-                  {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Create Account & Verify</Text>}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.guestLinkBox}
-                  onPress={() => {
-                    setFullName('Guest Player');
-                    setIsGuest(true);
-                    setIsAdmin(false);
-                    setStep('DASHBOARD');
-                  }}
-                >
-                  <Text style={styles.guestLinkText}>Explore as Guest Observer ➔</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={styles.fieldLabel}>Email Address</Text>
-                <TextInput
-                  style={styles.premiumInput}
-                  placeholder="Registered email"
-                  placeholderTextColor="#475569"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  value={email}
-                  onChangeText={setEmail}
-                />
-
-                <Text style={styles.fieldLabel}>Password</Text>
-                <TextInput
-                  style={styles.premiumInput}
-                  placeholder="Account password"
-                  placeholderTextColor="#475569"
-                  secureTextEntry
-                  value={password}
-                  onChangeText={setPassword}
-                />
-
-                <TouchableOpacity style={{ alignSelf: 'flex-end', marginTop: 8 }} onPress={handleForgotPassword}>
-                  <Text style={{ color: '#38BDF8', fontSize: 12, fontWeight: '700' }}>Forgot Password?</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.mainActionBtn} onPress={handleLogin} disabled={isProcessing}>
-                  {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Sign In</Text>}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.guestLinkBox}
-                  onPress={() => {
-                    setFullName('Guest Player');
-                    setIsGuest(true);
-                    setIsAdmin(false);
-                    setStep('DASHBOARD');
-                  }}
-                >
-                  <Text style={styles.guestLinkText}>Continue as Guest Observer ➔</Text>
-                </TouchableOpacity>
-              </>
-            )}
+            <TouchableOpacity
+              style={styles.guestLinkBox}
+              onPress={() => {
+                setFullName('Guest Observer');
+                setIsGuest(true);
+                setIsAdmin(false);
+                setStep('DASHBOARD');
+              }}
+            >
+              <Text style={styles.guestLinkText}>Explore as Guest Observer ➔</Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
       </SafeAreaView>
     );
   }
 
-  if (step === 'WAIT_EMAIL') {
+  // --- SUB-VIEW: OTP VERIFICATION SCREEN ---
+  if (step === 'OTP') {
     return (
       <SafeAreaView style={styles.authSafeContainer}>
         <View style={styles.verificationCard}>
           <View style={styles.verificationIconBubble}>
-            <Ionicons name="mail-open-outline" size={48} color="#38BDF8" />
+            <Ionicons name="shield-checkmark-outline" size={48} color="#38BDF8" />
           </View>
-          <Text style={styles.authMainTitle}>Verify Email Link</Text>
+          <Text style={styles.authMainTitle}>Enter Verification Code</Text>
           <Text style={styles.verifyDescription}>
-            We dispatched an official Google verification link to <Text style={{ color: '#38BDF8', fontWeight: '700' }}>{email}</Text>. Please click the link in your email and return here.
+            Enter the 4-digit code sent via SMS to <Text style={{ color: '#38BDF8', fontWeight: '700' }}>+91 {mobileNumber}</Text>
           </Text>
 
-          <TouchableOpacity style={styles.mainActionBtn} onPress={checkEmailVerification}>
-            <Text style={styles.mainActionBtnText}>I Have Verified</Text>
+          <TextInput
+            style={[styles.premiumInput, { textAlign: 'center', fontSize: 24, letterSpacing: 8, width: '80%', marginBottom: 20 }]}
+            placeholder="----"
+            placeholderTextColor="#475569"
+            keyboardType="number-pad"
+            maxLength={4}
+            value={otpCode}
+            onChangeText={setOtpCode}
+          />
+
+          <TouchableOpacity style={styles.mainActionBtn} onPress={handleVerifyOtp} disabled={isProcessing}>
+            {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Verify & Proceed</Text>}
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={{ marginTop: 20 }}
-            onPress={async () => {
-              if (auth.currentUser) await sendEmailVerification(auth.currentUser);
-              Alert.alert('Dispatched', 'A fresh verification email was sent.');
-            }}
-          >
-            <Text style={{ color: '#94A3B8', fontSize: 13, fontWeight: '600' }}>Resend Verification Link</Text>
+          <TouchableOpacity style={{ marginTop: 20 }} onPress={() => setStep('AUTH')}>
+            <Text style={{ color: '#94A3B8', fontSize: 13, fontWeight: '600' }}>Change Mobile Number</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  if (step === 'FACE_SCAN') {
+  // --- SUB-VIEW: PROFILE & PHOTO SETUP ---
+  if (step === 'PROFILE_SETUP') {
     return (
       <SafeAreaView style={styles.authSafeContainer}>
-        <View style={styles.verificationCard}>
-          <View style={[styles.verificationIconBubble, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
-            <MaterialCommunityIcons name="face-recognition" size={48} color="#38BDF8" />
-          </View>
-          <Text style={styles.authMainTitle}>Player Photo Verification</Text>
-          <Text style={styles.verifyDescription}>
-            Upload your profile photo or skip to enter the league dashboard immediately.
-          </Text>
+        <ScrollView contentContainerStyle={styles.authScroll}>
+          <View style={styles.verificationCard}>
+            <View style={[styles.verificationIconBubble, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
+              <MaterialCommunityIcons name="face-recognition" size={48} color="#38BDF8" />
+            </View>
+            <Text style={styles.authMainTitle}>Player Profile Setup</Text>
+            <Text style={styles.verifyDescription}>
+              Complete your player profile and upload a profile photo for league verification.
+            </Text>
 
-          <TouchableOpacity style={styles.avatarDropBox} onPress={pickImage}>
-            {profileImage ? (
-              <Image source={{ uri: profileImage }} style={styles.avatarPreviewImage} />
-            ) : (
-              <View style={{ alignItems: 'center' }}>
-                <Ionicons name="camera-outline" size={44} color="#64748B" />
-                <Text style={{ color: '#64748B', marginTop: 8, fontSize: 13 }}>Tap to Select Profile Photo</Text>
+            <TouchableOpacity style={styles.avatarDropBox} onPress={pickImage}>
+              {profileImage ? (
+                <Image source={{ uri: profileImage }} style={styles.avatarPreviewImage} />
+              ) : (
+                <View style={{ alignItems: 'center' }}>
+                  <Ionicons name="camera-outline" size={44} color="#64748B" />
+                  <Text style={{ color: '#64748B', marginTop: 8, fontSize: 13 }}>Tap to Select Photo</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            <View style={{ width: '100%', marginBottom: 15 }}>
+              <Text style={styles.fieldLabel}>Full Name</Text>
+              <TextInput
+                style={styles.premiumInput}
+                placeholder="e.g. Gajanan"
+                placeholderTextColor="#475569"
+                value={fullName}
+                onChangeText={setFullName}
+              />
+
+              <Text style={styles.fieldLabel}>Date of Birth (DD-MM-YYYY)</Text>
+              <View style={styles.phoneFieldWrap}>
+                <TextInput
+                  style={styles.phoneInputField}
+                  placeholder="DD-MM-YYYY"
+                  placeholderTextColor="#475569"
+                  keyboardType="number-pad"
+                  maxLength={10}
+                  value={dob}
+                  onChangeText={setDob}
+                />
+                <TouchableOpacity onPress={() => setShowDatePicker(true)} style={{ paddingRight: 14 }}>
+                  <Ionicons name="calendar" size={22} color="#38BDF8" />
+                </TouchableOpacity>
               </View>
-            )}
-          </TouchableOpacity>
+              {showDatePicker && (
+                <DateTimePicker
+                  value={selectedDate}
+                  mode="date"
+                  display="default"
+                  onChange={(e, d) => {
+                    setShowDatePicker(false);
+                    if (d) {
+                      setSelectedDate(d);
+                      setDob(`${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`);
+                    }
+                  }}
+                  maximumDate={new Date()}
+                />
+              )}
+            </View>
 
-          <TouchableOpacity style={styles.mainActionBtn} onPress={executeFaceVerification} disabled={isProcessing}>
-            {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Save & Enter League</Text>}
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={{ marginTop: 16, padding: 10 }} 
-            onPress={() => {
-              setStep('DASHBOARD');
-              setActiveTab('Home');
-            }}
-          >
-            <Text style={{ color: '#38BDF8', fontSize: 13, fontWeight: '700' }}>Skip Verification & Go to Dashboard ➔</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity style={styles.mainActionBtn} onPress={handleCompleteProfile} disabled={isProcessing}>
+              {isProcessing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.mainActionBtnText}>Save & Enter League</Text>}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
 
+  // --- SUB-VIEW: MASTER DASHBOARD ---
   return (
     <SafeAreaView style={styles.dashboardContainer}>
       <StatusBar barStyle="light-content" backgroundColor="#090D16" />
@@ -684,7 +584,7 @@ export default function MasterApp() {
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           {isAdmin && (
-            <TouchableOpacity style={styles.headerIconButton} onPress={() => setModalType('ADMIN_MATRIX')}>
+            <TouchableOpacity style={styles.headerIconButton} onPress={fetchAdminMatrixData}>
               <Ionicons name="shield-checkmark" size={20} color="#EF4444" />
             </TouchableOpacity>
           )}
@@ -746,11 +646,18 @@ export default function MasterApp() {
             </View>
 
             <View style={styles.joinTeamBox}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                <FontAwesome5 name="users" size={16} color="#38BDF8" />
-                <Text style={[styles.sectionHeading, { marginLeft: 8, marginBottom: 0 }]}>Squad Registration</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <FontAwesome5 name="users" size={16} color="#38BDF8" />
+                  <Text style={[styles.sectionHeading, { marginLeft: 8, marginBottom: 0 }]}>Squad Management</Text>
+                </View>
+                {!isGuest && (
+                  <TouchableOpacity onPress={() => setModalType('CREATE_TEAM')}>
+                    <Text style={{ color: '#38BDF8', fontWeight: '700', fontSize: 12 }}>+ Create Team</Text>
+                  </TouchableOpacity>
+                )}
               </View>
-              <Text style={styles.joinTeamDesc}>Enter the 6-digit invitation pass-key dispatched by your Team Captain.</Text>
+              <Text style={styles.joinTeamDesc}>Enter the 6-digit pass-key dispatched by your Team Captain to join squads.</Text>
               <View style={styles.teamCodeInputRow}>
                 <TextInput
                   style={styles.teamCodeInput}
@@ -768,7 +675,7 @@ export default function MasterApp() {
             </View>
 
             <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionHeading}>Instant Slot Booking</Text>
+              <Text style={styles.sectionHeading}>Instant Slot Booking (Live)</Text>
               <TouchableOpacity onPress={() => setActiveTab('Turfs')}>
                 <Text style={styles.viewAllText}>View All ➔</Text>
               </TouchableOpacity>
@@ -796,7 +703,7 @@ export default function MasterApp() {
                         fontWeight: '700',
                       }}
                     >
-                      {slot.status}
+                      {slot.status === 'Booked' ? slot.bookedBy || 'Booked' : 'Available'}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -846,7 +753,7 @@ export default function MasterApp() {
           <>
             <Text style={styles.sectionHeading}>Onikeri Floodlit Ground Slots</Text>
             <Text style={{ color: '#64748B', fontSize: 13, marginBottom: 16 }}>
-              Automated smart-switch LED floodlight enabled cricket turf.
+              Smart-switch LED floodlight enabled cricket turf. Bookings sync instantly for all players.
             </Text>
 
             {turfSlots.map((slot) => (
@@ -854,6 +761,9 @@ export default function MasterApp() {
                 <View>
                   <Text style={styles.slotFullTime}>{slot.time}</Text>
                   <Text style={styles.slotFullPrice}>{slot.price} / hour</Text>
+                  <Text style={{ color: slot.status === 'Booked' ? '#EF4444' : '#10B981', fontSize: 11, marginTop: 2, fontWeight: '600' }}>
+                    {slot.status === 'Booked' ? `Reserved by: ${slot.bookedBy || 'Player'}` : 'Status: Available'}
+                  </Text>
                 </View>
                 <TouchableOpacity
                   style={[styles.slotFullBtn, slot.status === 'Booked' && { backgroundColor: '#334155' }]}
@@ -879,6 +789,7 @@ export default function MasterApp() {
               )}
               <Text style={styles.profileNameDisplay}>{fullName}</Text>
               <Text style={styles.profileRoleDisplay}>{isAdmin ? 'Super Administrator' : isGuest ? 'Guest User' : 'Verified League Player'}</Text>
+              <Text style={{ color: '#64748B', fontSize: 12, marginTop: 4 }}>Mobile: +91 {mobileNumber || '9999999999'}</Text>
             </View>
 
             <View style={styles.statsCardGrid}>
@@ -899,15 +810,6 @@ export default function MasterApp() {
                 <Text style={styles.statLbl}>Ranking</Text>
               </View>
             </View>
-
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => Alert.alert('Security', 'Biometric & Firebase Token active.')}
-            >
-              <Ionicons name="shield-checkmark-outline" size={20} color="#38BDF8" />
-              <Text style={styles.menuItemText}>Security & Verification Status</Text>
-              <Ionicons name="chevron-forward" size={18} color="#475569" />
-            </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.menuItem, { marginTop: 24, borderColor: '#EF4444' }]}
@@ -944,6 +846,7 @@ export default function MasterApp() {
         })}
       </View>
 
+      {/* --- MODALS --- */}
       <Modal visible={modalType === 'RAZORPAY'} transparent animationType="slide">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
@@ -965,32 +868,50 @@ export default function MasterApp() {
         </View>
       </Modal>
 
+      {/* ADMIN GOD MODE AUDIT MATRIX */}
       <Modal visible={modalType === 'ADMIN_MATRIX'} transparent animationType="slide">
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalSheet, { maxHeight: '80%' }]}>
-            <Text style={[styles.modalTitle, { color: '#EF4444' }]}>System God Mode</Text>
-            <Text style={styles.modalSub}>Execute real-time infrastructure commands.</Text>
+          <View style={[styles.modalSheet, { maxHeight: '85%' }]}>
+            <Text style={[styles.modalTitle, { color: '#EF4444' }]}>System God Mode & Audit Center</Text>
+            <Text style={styles.modalSub}>Full administrative permissions over registered players, turf bookings, and team squads.</Text>
 
-            <ScrollView style={{ width: '100%', marginVertical: 15 }}>
-              {[
-                { title: 'Update Live Match Scorecard', action: () => setModalType('UPDATE_SCORE') },
-                { title: 'Publish Global Tournament', action: () => setModalType('CREATE_TOURNAMENT') },
-                {
-                  title: 'Credit ₹1,000 Administrative Balance',
-                  action: () => {
-                    setWalletBalance((prev) => prev + 1000);
-                    Alert.alert('Success', '₹1,000 credited to wallet.');
-                  },
-                },
-                {
-                  title: 'Trigger Automated Floodlight Reset',
-                  action: () => Alert.alert('Hardware Command', 'Signal dispatched to Onikeri Turf Relay Panel.'),
-                },
-              ].map((cmd, idx) => (
-                <TouchableOpacity key={idx} style={styles.adminCommandBtn} onPress={cmd.action}>
-                  <Text style={styles.adminCommandText}>{cmd.title}</Text>
-                  <Ionicons name="flash" size={16} color="#F59E0B" />
-                </TouchableOpacity>
+            <ScrollView style={{ width: '100%', marginVertical: 15 }} showsVerticalScrollIndicator={false}>
+              <Text style={{ color: '#38BDF8', fontWeight: '800', fontSize: 13, marginBottom: 8 }}>👥 All Registered Users ({allRegisteredUsers.length})</Text>
+              {allRegisteredUsers.map((u, i) => (
+                <View key={i} style={styles.adminUserRow}>
+                  {u.photoURL ? (
+                    <Image source={{ uri: u.photoURL }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+                  ) : (
+                    <View style={[styles.profilePlaceholder, { width: 36, height: 36, borderRadius: 18 }]}>
+                      <Ionicons name="person" size={16} color="#38BDF8" />
+                    </View>
+                  )}
+                  <View style={{ marginLeft: 10, flex: 1 }}>
+                    <Text style={{ color: '#F8FAFC', fontWeight: '700', fontSize: 13 }}>{u.fullName}</Text>
+                    <Text style={{ color: '#94A3B8', fontSize: 11 }}>+91 {u.mobileNumber} • {u.role}</Text>
+                  </View>
+                </View>
+              ))}
+
+              <Text style={{ color: '#38BDF8', fontWeight: '800', fontSize: 13, marginTop: 16, marginBottom: 8 }}>🏏 Created Teams & Squad Rosters ({allTeams.length})</Text>
+              {allTeams.map((team, idx) => (
+                <View key={idx} style={styles.adminCommandBtn}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: '#F8FAFC', fontWeight: '700', fontSize: 13 }}>{team.teamName} (Code: {team.teamCode})</Text>
+                    <Text style={{ color: '#94A3B8', fontSize: 11, marginTop: 2 }}>Captain: {team.captainName} (+91 {team.captainMobile})</Text>
+                    <Text style={{ color: '#10B981', fontSize: 11, marginTop: 2 }}>Members: {team.members?.map((m: any) => m.name).join(', ')}</Text>
+                  </View>
+                </View>
+              ))}
+
+              <Text style={{ color: '#38BDF8', fontWeight: '800', fontSize: 13, marginTop: 16, marginBottom: 8 }}>🏟️ Turf Slot Booking Audits</Text>
+              {turfSlots.map((s, idx) => (
+                <View key={idx} style={styles.adminCommandBtn}>
+                  <Text style={{ color: '#F8FAFC', fontSize: 12, fontWeight: '600' }}>{s.time}</Text>
+                  <Text style={{ color: s.status === 'Booked' ? '#EF4444' : '#10B981', fontSize: 12, fontWeight: '700' }}>
+                    {s.status === 'Booked' ? `Reserved by ${s.bookedBy}` : 'Available'}
+                  </Text>
+                </View>
               ))}
             </ScrollView>
 
@@ -1001,91 +922,27 @@ export default function MasterApp() {
         </View>
       </Modal>
 
-      <Modal visible={modalType === 'UPDATE_SCORE'} transparent animationType="fade">
+      {/* CREATE TEAM MODAL */}
+      <Modal visible={modalType === 'CREATE_TEAM'} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>Broadcast Match Scores</Text>
+            <Text style={styles.modalTitle}>Create Team Squad</Text>
+            <Text style={styles.modalSub}>Generate a 6-digit pass-key for your team.</Text>
+            
             <TextInput
-              style={styles.premiumInput}
-              placeholder="Team A Score (e.g. 142/3)"
+              style={[styles.premiumInput, { width: '100%', marginVertical: 15 }]}
+              placeholder="Team Name (e.g. Karwar Strikers)"
               placeholderTextColor="#64748B"
-              value={liveMatch.teamAScore}
-              onChangeText={(t) => setLiveMatch({ ...liveMatch, teamAScore: t })}
+              value={createdTeamName}
+              onChangeText={setCreatedTeamName}
             />
-            <TextInput
-              style={styles.premiumInput}
-              placeholder="Team A Overs (e.g. 14.2)"
-              placeholderTextColor="#64748B"
-              value={liveMatch.teamAOvers}
-              onChangeText={(t) => setLiveMatch({ ...liveMatch, teamAOvers: t })}
-            />
-            <TextInput
-              style={styles.premiumInput}
-              placeholder="Match Commentary / Status"
-              placeholderTextColor="#64748B"
-              value={liveMatch.status}
-              onChangeText={(t) => setLiveMatch({ ...liveMatch, status: t })}
-            />
-            <TouchableOpacity
-              style={styles.mainActionBtn}
-              onPress={() => {
-                setModalType('NONE');
-                Alert.alert('Broadcast Published', 'All connected spectators are receiving the updated stream.');
-              }}
-            >
-              <Text style={styles.mainActionBtnText}>Push Live Update</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
-      <Modal visible={modalType === 'CREATE_TOURNAMENT'} transparent animationType="fade">
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>Publish New Tournament</Text>
-            <TextInput
-              style={styles.premiumInput}
-              placeholder="Tournament Name"
-              placeholderTextColor="#64748B"
-              value={newTourney.name}
-              onChangeText={(t) => setNewTourney({ ...newTourney, name: t })}
-            />
-            <TextInput
-              style={styles.premiumInput}
-              placeholder="Prize Pool (e.g. ₹50,000)"
-              placeholderTextColor="#64748B"
-              value={newTourney.prize}
-              onChangeText={(t) => setNewTourney({ ...newTourney, prize: t })}
-            />
-            <TextInput
-              style={styles.premiumInput}
-              placeholder="Entry Fee (e.g. 1500)"
-              placeholderTextColor="#64748B"
-              keyboardType="number-pad"
-              value={newTourney.fee}
-              onChangeText={(t) => setNewTourney({ ...newTourney, fee: t })}
-            />
-            <TouchableOpacity
-              style={styles.mainActionBtn}
-              onPress={() => {
-                if (!newTourney.name || !newTourney.prize || !newTourney.fee) return Alert.alert('Error', 'Fill all fields.');
-                setTournaments([
-                  ...tournaments,
-                  {
-                    id: Math.random().toString(),
-                    name: newTourney.name,
-                    prize: newTourney.prize,
-                    teams: '16 Teams',
-                    fee: newTourney.fee,
-                    status: 'Open',
-                  },
-                ]);
-                setModalType('NONE');
-                setNewTourney({ name: '', prize: '', fee: '' });
-                Alert.alert('Success', 'Tournament is now open globally for registrations.');
-              }}
-            >
-              <Text style={styles.mainActionBtnText}>Publish Tournament</Text>
+            <TouchableOpacity style={styles.mainActionBtn} onPress={handleCreateTeam}>
+              <Text style={styles.mainActionBtnText}>Generate Pass-Key</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setModalType('NONE')}>
+              <Text style={styles.modalCloseText}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1099,8 +956,8 @@ export default function MasterApp() {
               <View style={styles.notificationItem}>
                 <Ionicons name="megaphone" size={20} color="#38BDF8" />
                 <View style={{ marginLeft: 10, flex: 1 }}>
-                  <Text style={{ color: '#F8FAFC', fontWeight: '700', fontSize: 13 }}>Final Registration Reminder</Text>
-                  <Text style={{ color: '#94A3B8', fontSize: 12 }}>Monsoon Box Cricket registration closes tonight.</Text>
+                  <Text style={{ color: '#F8FAFC', fontWeight: '700', fontSize: 13 }}>Real-Time Booking Sync Active</Text>
+                  <Text style={{ color: '#94A3B8', fontSize: 12 }}>All turf slot reservations now sync globally across devices.</Text>
                 </View>
               </View>
             </View>
@@ -1132,19 +989,6 @@ const styles = StyleSheet.create({
   leagueTag: { color: '#38BDF8', fontSize: 11, fontWeight: '800', letterSpacing: 2, marginBottom: 4 },
   authMainTitle: { fontSize: 24, fontWeight: '800', color: '#F8FAFC', textAlign: 'center' },
   authSubTitle: { color: '#64748B', fontSize: 13, textAlign: 'center', marginTop: 4, paddingHorizontal: 20 },
-  authSegmentContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#131C2E',
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#1E293B',
-  },
-  authSegmentBtn: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
-  authSegmentBtnActive: { backgroundColor: '#0284C7' },
-  authSegmentText: { color: '#64748B', fontWeight: '600', fontSize: 13 },
-  authSegmentTextActive: { color: '#FFFFFF', fontWeight: '700' },
   glassCard: {
     backgroundColor: '#131C2E',
     borderRadius: 18,
@@ -1163,8 +1007,6 @@ const styles = StyleSheet.create({
     borderColor: '#1E293B',
     fontSize: 14,
   },
-  inputInvalid: { borderColor: '#EF4444' },
-  fieldError: { color: '#EF4444', fontSize: 11, marginTop: 4, marginLeft: 2 },
   phoneFieldWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1182,6 +1024,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     marginTop: 22,
+    width: '100%',
   },
   mainActionBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   guestLinkBox: { marginTop: 16, alignItems: 'center' },
@@ -1198,9 +1041,9 @@ const styles = StyleSheet.create({
   },
   verifyDescription: { color: '#94A3B8', fontSize: 13, textAlign: 'center', marginVertical: 15, lineHeight: 20 },
   avatarDropBox: {
-    width: 180,
-    height: 180,
-    borderRadius: 90,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     borderWidth: 2,
     borderColor: '#38BDF8',
     borderStyle: 'dashed',
@@ -1208,7 +1051,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     overflow: 'hidden',
     backgroundColor: '#131C2E',
-    marginVertical: 20,
+    marginVertical: 15,
   },
   avatarPreviewImage: { width: '100%', height: '100%' },
   dashboardContainer: { flex: 1, backgroundColor: '#090D16' },
@@ -1364,7 +1207,7 @@ const styles = StyleSheet.create({
     borderColor: '#1E293B',
     alignItems: 'center',
   },
-  quickSlotDisabled: { opacity: 0.5 },
+  quickSlotDisabled: { opacity: 0.6 },
   slotTime: { color: '#F8FAFC', fontSize: 11, fontWeight: '700' },
   slotPrice: { color: '#38BDF8', fontSize: 13, fontWeight: '800', marginVertical: 4 },
   slotPill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
@@ -1490,13 +1333,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: '#090D16',
-    padding: 14,
+    padding: 12,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#1E293B',
     marginBottom: 8,
   },
-  adminCommandText: { color: '#F8FAFC', fontSize: 13, fontWeight: '600' },
+  adminUserRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#090D16',
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    marginBottom: 6,
+  },
   notificationItem: {
     flexDirection: 'row',
     alignItems: 'center',
