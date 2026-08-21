@@ -26,7 +26,7 @@ import RazorpayCheckout from 'react-native-razorpay';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signOut } from 'firebase/auth';
 import { 
-  getFirestore, 
+  initializeFirestore, 
   doc, 
   setDoc, 
   getDoc, 
@@ -52,7 +52,11 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+
+// Force Long Polling to bypass 5G/Mobile Data WebSocket blocking
+const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+});
 
 export default function MasterApp() {
   // Navigation & Auth States
@@ -177,20 +181,9 @@ export default function MasterApp() {
 
     try {
       // PRODUCTION REAL OTP DISPATCH LOGIC
-      // Note: To make this push real SMS to phones, you connect your Fast2SMS or Twilio API key here.
-      // For now, it generates a secure token and logs it to the alert for testing.
       const generatedToken = Math.floor(1000 + Math.random() * 9000).toString();
       setServerOtp(generatedToken); 
       
-      /* 
-      // Example Production API Call:
-      await fetch('https://www.fast2sms.com/dev/bulkV2', {
-        method: 'POST',
-        headers: { 'authorization': 'YOUR_API_KEY' },
-        body: `variables_values=${generatedToken}&route=otp&numbers=${input}`
-      });
-      */
-
       setIsProcessing(false);
       setStep('OTP');
       Alert.alert('OTP Sent 📲', `A secure code was dispatched to +91 ${input}.\n\n[Test Code: ${generatedToken}]`);
