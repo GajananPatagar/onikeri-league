@@ -1,7 +1,11 @@
 name: Build APK Fast
 
 on:
-  workflow_dispatch: # Allows you to manually trigger the build
+  push:
+    branches:
+    - main
+    
+      # Allows you to manually trigger the build
 
 jobs:
   build:
