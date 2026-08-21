@@ -20,6 +20,12 @@
           }
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "17939705-aeef-4380-829b-8ab2d9ef006a"
+      }
+    },
+    "owner": "gaju.19"
   }
 }
