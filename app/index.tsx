@@ -20,7 +20,6 @@ import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-ico
 import * as ImagePicker from 'expo-image-picker';
 
 // --- NATIVE MODULES ---
-import * as FaceDetector from 'expo-face-detector';
 import RazorpayCheckout from 'react-native-razorpay';
 
 // --- FIREBASE CLOUD SERVICES ---
@@ -204,7 +203,7 @@ export default function MasterApp() {
       if (err.code === 'auth/email-already-in-use') {
         Alert.alert(
           'Account Exists', 
-          'This email is already registered. Switching to login so you can complete your Face Verification.',
+          'This email is already registered. Switching to login so you can sign in.',
           [{ text: 'OK', onPress: () => setAuthMode('LOGIN') }]
         );
       } else {
@@ -230,7 +229,7 @@ export default function MasterApp() {
       if (user) {
         await user.reload();
         if (user.emailVerified) {
-          Alert.alert('Verified ✅', 'Email confirmed. Proceed to on-device Face Verification.');
+          Alert.alert('Verified ✅', 'Email confirmed. Proceed to Photo Verification.');
           setStep('FACE_SCAN');
         } else {
           Alert.alert('Pending ⏳', 'Email link not activated yet. Check your inbox/spam folder.');
@@ -331,15 +330,11 @@ export default function MasterApp() {
         setMobileNumber(data.mobileNumber || '');
         setProfileImage(data.photoURL || null);
         setIsAdmin(data.role === 'SuperAdmin');
-        
-        setIsProcessing(false);
-        setIsGuest(false);
-        setStep('DASHBOARD');
-        setActiveTab('Home');
       } else {
         const defaultName = cleanEmail.split('@')[0];
+        const generatedName = defaultName.charAt(0).toUpperCase() + defaultName.slice(1);
         await setDoc(doc(db, 'users', user.uid), {
-          fullName: defaultName.charAt(0).toUpperCase() + defaultName.slice(1),
+          fullName: generatedName,
           mobileNumber: '9999999999',
           email: cleanEmail,
           dob: '01-01-2000',
@@ -348,14 +343,13 @@ export default function MasterApp() {
           walletBalance: 100,
           registeredAt: new Date().toISOString(),
         });
-
-        setFullName(defaultName);
-        setIsProcessing(false);
-        setIsGuest(false);
-        setIsAdmin(false);
-        setStep('DASHBOARD');
-        setActiveTab('Home');
+        setFullName(generatedName);
       }
+
+      setIsProcessing(false);
+      setIsGuest(false);
+      setStep('DASHBOARD');
+      setActiveTab('Home');
     } catch (err: any) {
       setIsProcessing(false);
       Alert.alert('Login Failed', 'Invalid email or password. Please check your credentials.');
@@ -629,7 +623,7 @@ export default function MasterApp() {
           <View style={[styles.verificationIconBubble, { backgroundColor: 'rgba(56, 189, 248, 0.1)' }]}>
             <MaterialCommunityIcons name="face-recognition" size={48} color="#38BDF8" />
           </View>
-          <Text style={styles.authMainTitle}>Player Face ID Verification</Text>
+          <Text style={styles.authMainTitle}>Player Photo Verification</Text>
           <Text style={styles.verifyDescription}>
             Upload your profile photo or skip to enter the league dashboard immediately.
           </Text>
