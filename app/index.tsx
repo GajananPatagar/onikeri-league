@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, StatusBar, Text } from 'react-native';
+import { View, StyleSheet, StatusBar } from 'react-native';
 import LoginScreen from './src/screens/LoginScreen';
 import ProfileSetupScreen from './src/screens/ProfileSetupScreen';
-// Keep your other imports here...
+import DashboardScreen from './src/screens/DashboardScreen';
 
 export default function App() {
   const [authState, setAuthState] = useState<'LOGIN' | 'SETUP' | 'DASHBOARD'>('LOGIN');
   const [user, setUser] = useState<any>(null);
-  
-  // This now holds both the Mobile Number AND the secure Firebase UID
-  const [authData, setAuthData] = useState<{mobile: string, uid: string} | null>(null);
+  const [authData, setAuthData] = useState<any>(null);
 
   if (authState === 'LOGIN') {
     return (
@@ -18,7 +16,7 @@ export default function App() {
         <LoginScreen 
           onLoginSuccess={(userData: any) => { setUser(userData); setAuthState('DASHBOARD'); }}
           onRequireProfile={(data: any) => { setAuthData(data); setAuthState('SETUP'); }}
-          onAdminUnlock={() => { setUser({ role: 'SuperAdmin', fullName: 'SuperAdmin' }); setAuthState('DASHBOARD'); }}
+          onAdminUnlock={() => { setUser({ role: 'SuperAdmin', fullName: 'System Admin' }); setAuthState('DASHBOARD'); }}
         />
       </View>
     );
@@ -37,8 +35,9 @@ export default function App() {
 
   return (
     <View style={styles.container}>
-       {/* YOUR DASHBOARD REMAINS HERE */}
-       <Text style={{color: '#fff', marginTop: 100, textAlign: 'center'}}>Dashboard Loaded!</Text>
+       <StatusBar barStyle="light-content" backgroundColor="#090D16" />
+       {/* Loads the professional dashboard and passes the user data into it */}
+       <DashboardScreen user={user} onLogout={() => { setUser(null); setAuthState('LOGIN'); }} />
     </View>
   );
 }
