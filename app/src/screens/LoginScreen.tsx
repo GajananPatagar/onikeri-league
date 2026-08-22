@@ -4,9 +4,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
-// PRO FIX: Explicit Native Imports to prevent Web SDK collisions
-import firebase from '@react-native-firebase/app';
-import '@react-native-firebase/auth';
+// OFFICIAL MODERN RN FIREBASE IMPORT
+import auth from '@react-native-firebase/auth';
 
 export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminUnlock }: any) {
   const [identifier, setIdentifier] = useState('');
@@ -32,8 +31,8 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
 
     setIsProcessing(true);
     try {
-      // EXPLICIT NATIVE CALL: Bypasses bundler confusion
-      const confirmation = await firebase.auth().signInWithPhoneNumber(`+91${input}`);
+      // PROPER DIRECT NATIVE CALL
+      const confirmation = await auth().signInWithPhoneNumber(`+91${input}`);
       setConfirmResult(confirmation);
       
       setIsProcessing(false);
@@ -41,7 +40,7 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
       Alert.alert('OTP Sent 📲', 'Firebase has dispatched a secure 6-digit OTP to your mobile.');
     } catch (err: any) {
       setIsProcessing(false);
-      Alert.alert('Firebase Error', err.message || 'Failed to send OTP. Ensure your SHA keys are correctly linked.');
+      Alert.alert('Firebase Error', err.message || 'Failed to send OTP.');
     }
   };
 
