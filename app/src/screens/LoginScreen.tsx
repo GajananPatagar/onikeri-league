@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, StyleSheet } from 'react-native';
-import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 
-// IMPORT NATIVE FIREBASE AUTH
-import auth from '@react-native-firebase/auth';
+// PRO FIX: Explicit Native Imports to prevent Web SDK collisions
+import firebase from '@react-native-firebase/app';
+import '@react-native-firebase/auth';
 
 export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminUnlock }: any) {
   const [identifier, setIdentifier] = useState('');
@@ -14,7 +15,6 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
   const [userOtp, setUserOtp] = useState('');
   const [adminPass, setAdminPass] = useState('');
   
-  // Native Firebase Confirmation Object
   const [confirmResult, setConfirmResult] = useState<any>(null);
 
   const handleProceed = async () => {
@@ -32,8 +32,8 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
 
     setIsProcessing(true);
     try {
-      // OFFICIAL NATIVE FIREBASE OTP REQUEST
-      const confirmation = await auth().signInWithPhoneNumber(`+91${input}`);
+      // EXPLICIT NATIVE CALL: Bypasses bundler confusion
+      const confirmation = await firebase.auth().signInWithPhoneNumber(`+91${input}`);
       setConfirmResult(confirmation);
       
       setIsProcessing(false);
@@ -41,8 +41,7 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
       Alert.alert('OTP Sent 📲', 'Firebase has dispatched a secure 6-digit OTP to your mobile.');
     } catch (err: any) {
       setIsProcessing(false);
-      // Firebase throws specific errors if SHA-1 is missing or daily quota is exceeded
-      Alert.alert('Firebase Error', err.message || 'Failed to send OTP. Ensure your SHA-1/SHA-256 keys are in the Firebase Console.');
+      Alert.alert('Firebase Error', err.message || 'Failed to send OTP. Ensure your SHA keys are correctly linked.');
     }
   };
 
@@ -53,16 +52,13 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
 
     setIsProcessing(true);
     try {
-      // VERIFY FIREBASE NATIVE OTP
       const userCredential = await confirmResult.confirm(userOtp);
       const uid = userCredential.user.uid; 
       
-      // CHECK IF USER COMPLETED PROFILE
       const userDoc = await getDoc(doc(db, 'users', uid));
       if (userDoc.exists() && userDoc.data()?.photoURL && userDoc.data()?.fullName) {
         onLoginSuccess(userDoc.data());
       } else {
-        // Force new user to setup profile with their new Secure UID
         onRequireProfile({ mobile: identifier, uid: uid });
       }
     } catch (e: any) {
