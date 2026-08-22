@@ -23,7 +23,6 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
     return () => clearInterval(interval);
   }, [timer]);
 
-  // SECRET ADMIN TRIGGER: Tap the logo 5 times rapidly
   const handleLogoTap = () => {
     setAdminTaps(prev => prev + 1);
     if (adminTaps >= 4) {
@@ -46,7 +45,8 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
     } catch (err: any) {
       setIsProcessing(false);
       console.log(err);
-      Alert.alert('Verification Error', 'Firebase blocked the request. Ensure your EAS SHA-1 fingerprint is added to the Firebase Console.');
+      // REVEALS THE EXACT FIREBASE ERROR CODE NOW
+      Alert.alert('Firebase Error', `Code: ${err.code}\n\nMessage: ${err.message}`);
     }
   };
 
