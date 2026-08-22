@@ -5,7 +5,6 @@ import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 export default function DashboardScreen({ user, onLogout }: any) {
   return (
     <View style={styles.container}>
-      {/* HEADER SECTION */}
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>Welcome back,</Text>
@@ -17,8 +16,6 @@ export default function DashboardScreen({ user, onLogout }: any) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        
-        {/* DYNAMIC STATUS CARD */}
         <View style={[styles.statusCard, user?.role === 'SuperAdmin' ? styles.adminCard : user?.role === 'Guest' ? styles.guestCard : {}]}>
           <Text style={styles.statusTitle}>
             {user?.role === 'SuperAdmin' ? 'God Mode Active' : user?.role === 'Guest' ? 'Guest Access Mode' : 'Verified Player Account'}
@@ -34,9 +31,7 @@ export default function DashboardScreen({ user, onLogout }: any) {
 
         <Text style={styles.sectionTitle}>Dashboard Actions</Text>
         
-        {/* ACTION GRID */}
         <View style={styles.grid}>
-          {/* Hidden from Guests */}
           {user?.role !== 'Guest' && (
             <TouchableOpacity style={styles.gridItem}>
               <MaterialCommunityIcons name="stadium" size={32} color="#38BDF8" />
@@ -44,7 +39,6 @@ export default function DashboardScreen({ user, onLogout }: any) {
             </TouchableOpacity>
           )}
           
-          {/* Hidden from SuperAdmin */}
           {user?.role !== 'SuperAdmin' && user?.role !== 'Guest' && (
             <TouchableOpacity style={styles.gridItem}>
               <MaterialCommunityIcons name="account-group" size={32} color="#10B981" />
@@ -52,7 +46,6 @@ export default function DashboardScreen({ user, onLogout }: any) {
             </TouchableOpacity>
           )}
 
-          {/* ONLY Visible to SuperAdmin */}
           {user?.role === 'SuperAdmin' && (
             <TouchableOpacity style={styles.gridItem}>
               <MaterialCommunityIcons name="security" size={32} color="#EF4444" />
@@ -60,7 +53,6 @@ export default function DashboardScreen({ user, onLogout }: any) {
             </TouchableOpacity>
           )}
 
-          {/* Visible to Everyone */}
           <TouchableOpacity style={styles.gridItem}>
             <MaterialCommunityIcons name="trophy" size={32} color="#F59E0B" />
             <Text style={styles.gridText}>Live League</Text>

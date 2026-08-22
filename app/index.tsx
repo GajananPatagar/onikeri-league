@@ -36,7 +36,6 @@ export default function App() {
   return (
     <View style={styles.container}>
        <StatusBar barStyle="light-content" backgroundColor="#090D16" />
-       {/* Loads the professional dashboard and passes the user data into it */}
        <DashboardScreen user={user} onLogout={() => { setUser(null); setAuthState('LOGIN'); }} />
     </View>
   );
