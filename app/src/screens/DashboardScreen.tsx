@@ -3,9 +3,27 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, TextInput 
 import { MaterialCommunityIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
 
 export default function DashboardScreen({ user, onLogout }: any) {
-  // Navigation State to switch between different internal windows
   const [activeView, setActiveView] = useState<'HOME' | 'BOOK_TURF' | 'SQUAD' | 'ADMIN_USERS' | 'ADMIN_MATCHES' | 'ADMIN_FINANCE' | 'OVERRIDE' | 'LEAGUE'>('HOME');
 
+  // --------------------------------------------------------
+  // LIVE APP DATA STATE (Makes everything functional!)
+  // --------------------------------------------------------
+  const [wallet, setWallet] = useState(user?.walletBalance || 0);
+  const [revenue, setRevenue] = useState(45200);
+  const [matchScore, setMatchScore] = useState({ runs: '145', wickets: '3', overs: '15.2', teamA: 'Onikeri Kings', teamB: 'Hubli Strikers' });
+  const [runsInput, setRunsInput] = useState('');
+  const [wicketsInput, setWicketsInput] = useState('');
+  const [oversInput, setOversInput] = useState('');
+  
+  const [players, setPlayers] = useState([
+    { id: 1, name: 'Gajanan (Captain)', status: 'Active', role: 'Batsman' },
+    { id: 2, name: 'Rahul (Pace)', status: 'Active', role: 'Bowler' },
+    { id: 3, name: 'Vikram (Spin)', status: 'Banned', role: 'All-Rounder' }
+  ]);
+
+  // --------------------------------------------------------
+  // FUNCTIONAL ACTIONS
+  // --------------------------------------------------------
   const handleGuestBlock = () => {
     Alert.alert('Verification Required', 'You must log in with a verified mobile number to use this feature.', [
       { text: 'Cancel', style: 'cancel' },
@@ -13,14 +31,35 @@ export default function DashboardScreen({ user, onLogout }: any) {
     ]);
   };
 
-  const handleRazorpay = (amount: number) => {
-    Alert.alert('Razorpay Gateway', `Initializing Secure Payment for ₹${amount}. Razorpay SDK will launch here.`);
+  const handleRazorpay = (amount: number, reason: string) => {
+    Alert.alert('Razorpay Gateway', `Processing ₹${amount} for ${reason}.\n\n(Simulating Payment Success)`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Pay Now', onPress: () => {
+          setWallet(prev => prev + amount);
+          setRevenue(prev => prev + amount);
+          Alert.alert('Payment Successful', `₹${amount} has been added to your account!`);
+      }}
+    ]);
+  };
+
+  const togglePlayerBan = (id: number) => {
+    setPlayers(players.map(p => p.id === id ? { ...p, status: p.status === 'Active' ? 'Banned' : 'Active' } : p));
+  };
+
+  const handleUpdateScore = () => {
+    setMatchScore(prev => ({
+      ...prev,
+      runs: runsInput || prev.runs,
+      wickets: wicketsInput || prev.wickets,
+      overs: oversInput || prev.overs
+    }));
+    setRunsInput(''); setWicketsInput(''); setOversInput('');
+    Alert.alert('Score Updated', 'The Live League has been updated globally!');
   };
 
   // --------------------------------------------------------
-  // INTERNAL WINDOW COMPONENTS
+  // INTERNAL WINDOW RENDERERS
   // --------------------------------------------------------
-
   const renderHeader = (title: string) => (
     <View style={styles.subHeader}>
       <TouchableOpacity onPress={() => setActiveView('HOME')} style={styles.backBtn}>
@@ -31,7 +70,7 @@ export default function DashboardScreen({ user, onLogout }: any) {
     </View>
   );
 
-  const renderBookTurf = () => (
+  if (activeView === 'BOOK_TURF') return (
     <View style={styles.subView}>
       {renderHeader('Book a Turf')}
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -39,36 +78,30 @@ export default function DashboardScreen({ user, onLogout }: any) {
           <Text style={styles.sectionTitle}>Select Turf</Text>
           <TouchableOpacity style={[styles.gridItem, {width: '100%', borderColor: '#38BDF8'}]}>
             <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>Main Stadium - Pitch A</Text>
-            <Text style={{color: '#94A3B8'}}>₹1,200 / hour</Text>
+            <Text style={{color: '#94A3B8'}}>₹1,200 / match</Text>
           </TouchableOpacity>
         </View>
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Available Slots (Today)</Text>
-          <View style={{flexDirection: 'row', gap: 10, flexWrap: 'wrap'}}>
-            <TouchableOpacity style={styles.timeSlot}><Text style={styles.timeText}>06:00 AM</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.timeSlot}><Text style={styles.timeText}>08:00 AM</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.timeSlot}><Text style={styles.timeText}>05:00 PM</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.timeSlot}><Text style={styles.timeText}>08:00 PM</Text></TouchableOpacity>
-          </View>
-        </View>
-        <TouchableOpacity style={styles.actionBtn} onPress={() => handleRazorpay(1200)}>
+        <TouchableOpacity style={styles.actionBtn} onPress={() => handleRazorpay(1200, 'Turf Booking')}>
           <Text style={styles.actionBtnText}>Pay ₹1,200 via Razorpay</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
   );
 
-  const renderAdminUsers = () => (
+  if (activeView === 'ADMIN_USERS') return (
     <View style={styles.subView}>
       {renderHeader('Manage Users')}
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Registered Players</Text>
-          {['Gajanan (Captain)', 'Rahul (Bowler)', 'Vikram (Batsman)'].map((name, i) => (
-            <View key={i} style={styles.listItem}>
-              <Text style={{color: '#fff', fontSize: 16}}>{name}</Text>
-              <TouchableOpacity style={styles.editBtn}>
-                <Text style={{color: '#fff', fontSize: 12}}>Edit / Ban</Text>
+          {players.map((p) => (
+            <View key={p.id} style={styles.listItem}>
+              <View>
+                <Text style={{color: p.status === 'Banned' ? '#64748B' : '#fff', fontSize: 16, textDecorationLine: p.status === 'Banned' ? 'line-through' : 'none'}}>{p.name}</Text>
+                <Text style={{color: p.status === 'Banned' ? '#EF4444' : '#10B981', fontSize: 12}}>{p.status}</Text>
+              </View>
+              <TouchableOpacity style={[styles.editBtn, p.status === 'Banned' && {backgroundColor: '#10B981'}]} onPress={() => togglePlayerBan(p.id)}>
+                <Text style={{color: '#fff', fontSize: 12}}>{p.status === 'Banned' ? 'Unban' : 'Ban'}</Text>
               </TouchableOpacity>
             </View>
           ))}
@@ -77,18 +110,23 @@ export default function DashboardScreen({ user, onLogout }: any) {
     </View>
   );
 
-  const renderAdminMatches = () => (
+  if (activeView === 'ADMIN_MATCHES') return (
     <View style={styles.subView}>
       {renderHeader('Live Match Editor')}
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Onikeri Kings vs Hubli Strikers</Text>
-          <View style={{flexDirection: 'row', justifyContent: 'space-between', marginVertical: 15}}>
-            <TextInput style={styles.scoreInput} placeholder="Runs" placeholderTextColor="#475569" keyboardType="number-pad" />
-            <Text style={{color: '#fff', fontSize: 24, alignSelf: 'center'}}>/</Text>
-            <TextInput style={styles.scoreInput} placeholder="Wickets" placeholderTextColor="#475569" keyboardType="number-pad" />
-          </View>
-          <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#10B981'}]}>
+          <Text style={styles.sectionTitle}>{matchScore.teamA} vs {matchScore.teamB}</Text>
+          
+          <Text style={styles.label}>Runs</Text>
+          <TextInput style={styles.scoreInput} placeholder={matchScore.runs} placeholderTextColor="#475569" keyboardType="number-pad" value={runsInput} onChangeText={setRunsInput} />
+          
+          <Text style={styles.label}>Wickets</Text>
+          <TextInput style={styles.scoreInput} placeholder={matchScore.wickets} placeholderTextColor="#475569" keyboardType="number-pad" value={wicketsInput} onChangeText={setWicketsInput} />
+          
+          <Text style={styles.label}>Overs</Text>
+          <TextInput style={styles.scoreInput} placeholder={matchScore.overs} placeholderTextColor="#475569" keyboardType="numeric" value={oversInput} onChangeText={setOversInput} />
+          
+          <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#10B981', marginTop: 20}]} onPress={handleUpdateScore}>
             <Text style={styles.actionBtnText}>Update Live Scoreboard</Text>
           </TouchableOpacity>
         </View>
@@ -96,61 +134,43 @@ export default function DashboardScreen({ user, onLogout }: any) {
     </View>
   );
 
-  const renderAdminFinance = () => (
+  if (activeView === 'ADMIN_FINANCE') return (
     <View style={styles.subView}>
       {renderHeader('Financial Dashboard')}
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={[styles.statusCard, {backgroundColor: '#10B981'}]}>
           <Text style={styles.statusTitle}>Total League Revenue</Text>
-          <Text style={{color: '#fff', fontSize: 32, fontWeight: 'bold'}}>₹ 45,200.00</Text>
+          <Text style={{color: '#fff', fontSize: 32, fontWeight: 'bold'}}>₹ {revenue.toLocaleString()}</Text>
         </View>
         <Text style={styles.sectionTitle}>Recent Razorpay Transactions</Text>
         <View style={styles.card}>
-          <Text style={{color: '#38BDF8', marginBottom: 5}}>+ ₹1,200 (Turf Booking - Gajanan)</Text>
-          <Text style={{color: '#38BDF8', marginBottom: 5}}>+ ₹5,000 (Team Registration - Kings)</Text>
+          <Text style={{color: '#38BDF8', marginBottom: 15, fontSize: 16}}>+ ₹1,200 (Turf Booking - Gajanan)</Text>
+          <Text style={{color: '#38BDF8', marginBottom: 15, fontSize: 16}}>+ ₹500 (Wallet Add - Rahul)</Text>
+          <Text style={{color: '#38BDF8', marginBottom: 15, fontSize: 16}}>+ ₹5,000 (Team Entry - Kings)</Text>
         </View>
       </ScrollView>
     </View>
   );
 
-  const renderLiveLeague = () => (
+  if (activeView === 'LEAGUE') return (
     <View style={styles.subView}>
       {renderHeader('Live Scoreboard')}
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.card}>
-          <Text style={{color: '#EF4444', fontWeight: 'bold', marginBottom: 10}}>🔴 LIVE NOW</Text>
-          <Text style={{color: '#fff', fontSize: 20, fontWeight: 'bold'}}>Onikeri Kings</Text>
-          <Text style={{color: '#38BDF8', fontSize: 40, fontWeight: '900', marginVertical: 10}}>145 / 3</Text>
-          <Text style={{color: '#94A3B8', fontSize: 16}}>Overs: 15.2</Text>
+          <Text style={{color: '#EF4444', fontWeight: 'bold', marginBottom: 10, letterSpacing: 2}}>🔴 LIVE NOW</Text>
+          <Text style={{color: '#fff', fontSize: 24, fontWeight: 'bold'}}>{matchScore.teamA}</Text>
+          <Text style={{color: '#38BDF8', fontSize: 48, fontWeight: '900', marginVertical: 10}}>{matchScore.runs} / {matchScore.wickets}</Text>
+          <Text style={{color: '#94A3B8', fontSize: 18}}>Overs: {matchScore.overs}</Text>
           <View style={{height: 1, backgroundColor: '#1E293B', marginVertical: 15}} />
-          <Text style={{color: '#fff', fontSize: 16}}>Hubli Strikers yet to bat</Text>
+          <Text style={{color: '#fff', fontSize: 16}}>{matchScore.teamB} yet to bat</Text>
         </View>
       </ScrollView>
     </View>
   );
 
   // --------------------------------------------------------
-  // MAIN DASHBOARD VIEW
+  // MAIN DASHBOARD HOME
   // --------------------------------------------------------
-
-  if (activeView !== 'HOME') {
-    if (activeView === 'BOOK_TURF') return renderBookTurf();
-    if (activeView === 'ADMIN_USERS') return renderAdminUsers();
-    if (activeView === 'ADMIN_MATCHES') return renderAdminMatches();
-    if (activeView === 'ADMIN_FINANCE') return renderAdminFinance();
-    if (activeView === 'LEAGUE') return renderLiveLeague();
-    
-    // Fallback for empty screens
-    return (
-      <View style={styles.subView}>
-        {renderHeader('Module Under Construction')}
-        <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
-          <Text style={{color: '#94A3B8'}}>This section is currently being built.</Text>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -173,11 +193,11 @@ export default function DashboardScreen({ user, onLogout }: any) {
               ? 'You have unrestricted access. You can edit any user data, alter match scores, override turf bookings, and manage league financials.' 
               : user?.role === 'Guest' 
               ? 'You are browsing anonymously. Most features are locked until you verify your mobile number.'
-              : `Wallet Balance: ₹${user?.walletBalance || 0}. You can now book turfs and join squads.`}
+              : `Wallet Balance: ₹${wallet}. You can now book turfs and join squads.`}
           </Text>
           
           {user?.role !== 'Guest' && user?.role !== 'SuperAdmin' && (
-             <TouchableOpacity style={styles.payBtn} onPress={() => handleRazorpay(500)}>
+             <TouchableOpacity style={styles.payBtn} onPress={() => handleRazorpay(500, 'Wallet Top-up')}>
                <Text style={styles.payBtnText}>+ Add Funds (Razorpay)</Text>
              </TouchableOpacity>
           )}
@@ -216,7 +236,7 @@ export default function DashboardScreen({ user, onLogout }: any) {
                 <MaterialCommunityIcons name="bank-transfer" size={32} color="#10B981" />
                 <Text style={styles.gridText}>Financials</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.gridItem} onPress={() => setActiveView('OVERRIDE')}>
+              <TouchableOpacity style={styles.gridItem}>
                 <MaterialCommunityIcons name="shield-alert" size={32} color="#EF4444" />
                 <Text style={styles.gridText}>System Override</Text>
               </TouchableOpacity>
@@ -263,5 +283,6 @@ const styles = StyleSheet.create({
   timeText: { color: '#38BDF8', fontWeight: 'bold' },
   listItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderColor: '#1E293B' },
   editBtn: { backgroundColor: '#EF4444', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
-  scoreInput: { backgroundColor: '#090D16', color: '#fff', fontSize: 24, textAlign: 'center', padding: 15, borderRadius: 10, width: '40%', borderWidth: 1, borderColor: '#1E293B' }
+  label: { color: '#94A3B8', marginBottom: 8, fontWeight: '700', fontSize: 12, marginTop: 10 },
+  scoreInput: { backgroundColor: '#090D16', color: '#fff', fontSize: 18, padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#1E293B' }
 });

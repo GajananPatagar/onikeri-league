@@ -16,6 +16,7 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
   
   const [timer, setTimer] = useState(0);
   const [confirmResult, setConfirmResult] = useState<any>(null);
+  const [isSimulated, setIsSimulated] = useState(false);
 
   useEffect(() => {
     let interval: any;
@@ -23,6 +24,7 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
     return () => clearInterval(interval);
   }, [timer]);
 
+  // SECRET ADMIN TRIGGER: Tap the logo 5 times rapidly
   const handleLogoTap = () => {
     setAdminTaps(prev => prev + 1);
     if (adminTaps >= 4) {
@@ -37,16 +39,35 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
 
     setIsProcessing(true);
     try {
+      // Tries to call the Native Android Firebase SMS
       const confirmation = await auth().signInWithPhoneNumber(`+91${identifier}`);
       setConfirmResult(confirmation);
+      setIsSimulated(false);
       setIsProcessing(false);
       setStep('OTP');
       setTimer(30);
     } catch (err: any) {
       setIsProcessing(false);
-      console.log(err);
-      // REVEALS THE EXACT FIREBASE ERROR CODE NOW
-      Alert.alert('Firebase Error', `Code: ${err.code}\n\nMessage: ${err.message}`);
+      
+      // If Native Code is missing (Expo Go or Cache error), activate Developer Bypass!
+      if (err.name === 'TypeError' || err.message?.includes('not a function') || err.message?.includes('undefined')) {
+        Alert.alert(
+          'Developer Mode Activated 🛠️', 
+          'Native Firebase code is missing (Likely running in Expo Go).\n\nBypassing SMS. Use test OTP: 123456 to enter the app.'
+        );
+        setIsSimulated(true);
+        setConfirmResult({
+          confirm: async (code: string) => {
+            if (code === '123456') return { user: { uid: 'test_dev_uid_123' } };
+            throw new Error('Invalid Test OTP. Use 123456');
+          }
+        });
+        setStep('OTP');
+        setTimer(30);
+      } else {
+        // Real Firebase block (e.g. SHA-1 issue)
+        Alert.alert('Firebase Error', `Code: ${err.code}\n\nMessage: ${err.message}`);
+      }
     }
   };
 
@@ -58,6 +79,12 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
       const userCredential = await confirmResult.confirm(userOtp);
       const uid = userCredential.user.uid; 
       
+      // If using Developer Bypass, skip web database to prevent crashes and log straight in!
+      if (isSimulated) {
+        setIsProcessing(false);
+        return onLoginSuccess({ uid: uid, fullName: name || 'Test Player', role: 'Player', walletBalance: 500 });
+      }
+
       const userDoc = await getDoc(doc(db, 'users', uid));
       if (userDoc.exists() && userDoc.data()?.photoURL) {
         onLoginSuccess(userDoc.data());
@@ -66,7 +93,7 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
       }
     } catch (e: any) {
       setIsProcessing(false);
-      Alert.alert('Verification Failed', 'The code entered is incorrect or expired.');
+      Alert.alert('Verification Failed', e.message || 'The code entered is incorrect or expired.');
     }
   };
 
