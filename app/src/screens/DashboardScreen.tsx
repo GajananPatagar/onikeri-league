@@ -35,8 +35,8 @@ export default function DashboardScreen({ user, onLogout }: any) {
     Alert.alert('Razorpay Gateway', `Processing ₹${amount} for ${reason}.\n\n(Simulating Payment Success)`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Pay Now', onPress: () => {
-          setWallet(prev => prev + amount);
-          setRevenue(prev => prev + amount);
+          setWallet((prev: number) => prev + amount);
+          setRevenue((prev: number) => prev + amount);
           Alert.alert('Payment Successful', `₹${amount} has been added to your account!`);
       }}
     ]);
@@ -236,7 +236,7 @@ export default function DashboardScreen({ user, onLogout }: any) {
                 <MaterialCommunityIcons name="bank-transfer" size={32} color="#10B981" />
                 <Text style={styles.gridText}>Financials</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.gridItem}>
+              <TouchableOpacity style={styles.gridItem} onPress={() => Alert.alert('Override Active', 'System settings overridden.')}>
                 <MaterialCommunityIcons name="shield-alert" size={32} color="#EF4444" />
                 <Text style={styles.gridText}>System Override</Text>
               </TouchableOpacity>
