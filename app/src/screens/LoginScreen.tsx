@@ -4,7 +4,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import auth from '@react-native-firebase/auth';
-import Constants from 'expo-constants';
 
 export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminUnlock }: any) {
   const [name, setName] = useState('');
@@ -37,14 +36,6 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
     if (name.trim().length < 2) return Alert.alert('Required', 'Please enter your name.');
     if (!/^[6-9]\d{9}$/.test(identifier)) return Alert.alert('Invalid Number', 'Enter a valid 10-digit mobile number.');
 
-    // EXPO GO SAFEGUARD
-    if (Constants.appOwnership === 'expo') {
-      return Alert.alert(
-        'Testing Environment Error 🛑', 
-        'You are running this inside Expo Go!\n\nNative Firebase SMS does not exist in Expo Go. You MUST build and install the actual APK to receive the OTP.'
-      );
-    }
-
     setIsProcessing(true);
     try {
       // 100% REAL FIREBASE SMS REQUEST
@@ -56,7 +47,7 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
     } catch (err: any) {
       setIsProcessing(false);
       console.log(err);
-      Alert.alert('Verification Error', err?.message || 'Firebase failed to send the code.');
+      Alert.alert('Firebase Error', err?.message || 'Failed to send OTP.');
     }
   };
 
@@ -65,6 +56,7 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
 
     setIsProcessing(true);
     try {
+      // CONFIRM REAL OTP
       const userCredential = await confirmResult.confirm(userOtp);
       const uid = userCredential.user.uid; 
       
