@@ -5,9 +5,11 @@ import RazorpayCheckout from 'react-native-razorpay';
 import { ref, onValue, set, update, remove } from 'firebase/database';
 import { doc, updateDoc, collection, getDocs, deleteDoc, setDoc, getDoc } from 'firebase/firestore';
 import { rtdb, db } from '../config/firebase';
+import StatsLeaderboardScreen from './StatsLeaderboardScreen';
+
 
 export default function DashboardScreen({ user, onLogout }: any) {
-  const [activeView, setActiveView] = useState<'HOME' | 'LEAGUE' | 'ADMIN_HUB' | 'CREATE_MATCH' | 'ADMIN_PANEL' | 'MANAGE_USERS' | 'MANAGE_BOX' | 'BOOK_BOX' | 'MY_SQUAD'>('HOME');
+  const [activeView, setActiveView] = useState<'HOME' | 'LEAGUE' | 'ADMIN_HUB' | 'CREATE_MATCH' | 'ADMIN_PANEL' | 'MANAGE_USERS' | 'MANAGE_BOX' | 'BOOK_BOX' | 'MY_SQUAD' | 'STATS'>('HOME');
   
   // Real Data States
   const [wallet, setWallet] = useState(user?.walletBalance || 0);
