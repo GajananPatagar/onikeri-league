@@ -1,139 +1,134 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform, TouchableWithoutFeedback } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { doc, getDoc } from 'firebase/firestore';
+import React, { useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import auth from '@react-native-firebase/auth';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
-export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminUnlock }: any) {
-  const [name, setName] = useState('');
-  const [identifier, setIdentifier] = useState('');
-  const [step, setStep] = useState<'INPUT' | 'OTP' | 'ADMIN'>('INPUT');
+// REPLACE THIS WITH YOUR FIREBASE WEB CLIENT ID
+GoogleSignin.configure({
+  webClientId: 'YOUR_WEB_CLIENT_ID_FROM_FIREBASE.apps.googleusercontent.com',
+});
+
+export default function LoginScreen({ onLoginSuccess }: any) {
+  const [step, setStep] = useState<'LOGIN' | 'ONBOARDING'>('LOGIN');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [userOtp, setUserOtp] = useState('');
-  const [adminPass, setAdminPass] = useState('');
-  const [adminTaps, setAdminTaps] = useState(0);
   
-  const [timer, setTimer] = useState(0);
-  const [confirmResult, setConfirmResult] = useState<any>(null);
+  // Onboarding State
+  const [tempUid, setTempUid] = useState('');
+  const [tempEmail, setTempEmail] = useState('');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [selectedRole, setSelectedRole] = useState('');
 
-  useEffect(() => {
-    let interval: any;
-    if (timer > 0) interval = setInterval(() => setTimer((t) => t - 1), 1000);
-    return () => clearInterval(interval);
-  }, [timer]);
+  const roles = ['Batter', 'Bowler', 'All-rounder', 'Wicket Keeper'];
 
-  // SECRET ADMIN TRIGGER: Tap the logo 5 times rapidly
-  const handleLogoTap = () => {
-    setAdminTaps(prev => prev + 1);
-    if (adminTaps >= 4) {
-      setStep('ADMIN');
-      setAdminTaps(0);
-    }
-  };
-
-  const handleProceed = async () => {
-    if (name.trim().length < 2) return Alert.alert('Required', 'Please enter your name.');
-    if (!/^[6-9]\d{9}$/.test(identifier)) return Alert.alert('Invalid Number', 'Enter a valid 10-digit mobile number.');
-
+  const handleGoogleLogin = async () => {
     setIsProcessing(true);
     try {
-      // 100% REAL FIREBASE SMS REQUEST
-      const confirmation = await auth().signInWithPhoneNumber(`+91${identifier}`);
-      setConfirmResult(confirmation);
-      setIsProcessing(false);
-      setStep('OTP');
-      setTimer(30);
-    } catch (err: any) {
-      setIsProcessing(false);
-      console.log(err);
-      Alert.alert('Firebase Error', err?.message || 'Failed to send OTP.');
-    }
-  };
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      const { idToken } = await GoogleSignin.signIn();
+      const googleCredential = auth.GoogleAuthProvider.credential(idToken);
+      const userCredential = await auth().signInWithCredential(googleCredential);
+      const user = userCredential.user;
 
-  const handleVerifyOtp = async () => {
-    if (userOtp.length !== 6) return Alert.alert('Invalid Code', 'Verification codes must be 6 digits long.');
-
-    setIsProcessing(true);
-    try {
-      // CONFIRM REAL OTP
-      const userCredential = await confirmResult.confirm(userOtp);
-      const uid = userCredential.user.uid; 
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
       
-      const userDoc = await getDoc(doc(db, 'users', uid));
-      if (userDoc.exists() && userDoc.data()?.photoURL) {
+      if (userDoc.exists() && userDoc.data()?.role) {
+        setIsProcessing(false);
         onLoginSuccess(userDoc.data());
       } else {
-        onRequireProfile({ mobile: identifier, uid: uid, predefinedName: name });
+        setTempUid(user.uid);
+        setTempEmail(user.email || '');
+        setName(user.displayName || '');
+        setIsProcessing(false);
+        setStep('ONBOARDING');
       }
-    } catch (e: any) {
+    } catch (error: any) {
       setIsProcessing(false);
-      Alert.alert('Verification Failed', 'The code entered is incorrect or expired.');
+      console.log(error);
+      Alert.alert('Login Failed', error.message || 'Could not connect to Google.');
+    }
+  };
+
+  const handleCompleteProfile = async () => {
+    if (name.trim().length < 2) return Alert.alert('Required', 'Please enter your full name.');
+    if (!/^[6-9]\d{9}$/.test(phone)) return Alert.alert('Required', 'Enter a valid 10-digit mobile number.');
+    if (!selectedRole) return Alert.alert('Required', 'Please select your playing role.');
+
+    setIsProcessing(true);
+    try {
+      const newUserInfo = {
+        uid: tempUid,
+        email: tempEmail,
+        fullName: name,
+        mobileNumber: phone,
+        playingRole: selectedRole,
+        walletBalance: 0,
+        status: 'Active',
+        appRole: 'Player'
+      };
+
+      await setDoc(doc(db, 'users', tempUid), newUserInfo);
+      setIsProcessing(false);
+      onLoginSuccess(newUserInfo);
+    } catch (error: any) {
+      setIsProcessing(false);
+      Alert.alert('Error', 'Could not save profile. Try again.');
     }
   };
 
   const handleGuestLogin = () => {
-    onLoginSuccess({
-      uid: 'guest_' + Math.random().toString(36).substring(7),
-      fullName: 'Guest User',
-      role: 'Guest',
-      walletBalance: 0
-    });
+    onLoginSuccess({ uid: 'guest_' + Math.random().toString(36).substring(7), fullName: 'Guest Fan', appRole: 'Guest', walletBalance: 0 });
   };
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.container}>
-      <TouchableWithoutFeedback onPress={handleLogoTap}>
-        <View style={{ alignItems: 'center' }}>
-          <MaterialCommunityIcons name="cricket" size={64} color="#38BDF8" style={{ marginBottom: 15 }} />
-          <Text style={styles.title}>Onikeri Premier League</Text>
-          <Text style={styles.subtitle}>Professional Turf & League Management</Text>
-        </View>
-      </TouchableWithoutFeedback>
+      <View style={{ alignItems: 'center', marginBottom: 40 }}>
+        <MaterialCommunityIcons name="cricket" size={64} color="#38BDF8" style={{ marginBottom: 15 }} />
+        <Text style={styles.title}>Onikeri Premier League</Text>
+        <Text style={styles.subtitle}>Professional Turf & League Management</Text>
+      </View>
       
-      {step === 'INPUT' && (
+      {step === 'LOGIN' && (
         <View style={styles.card}>
-          <Text style={styles.label}>Your Name</Text>
-          <TextInput style={styles.input} placeholder="e.g. Gajanan" placeholderTextColor="#475569" autoCapitalize="words" value={name} onChangeText={setName} />
-          
-          <Text style={styles.label}>Mobile Number</Text>
-          <TextInput style={styles.input} keyboardType="number-pad" placeholder="10-digit number" placeholderTextColor="#475569" maxLength={10} value={identifier} onChangeText={setIdentifier} />
-          
-          <TouchableOpacity style={styles.btn} onPress={handleProceed} disabled={isProcessing}>
-            {isProcessing ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Get Verification Code</Text>}
+          <TouchableOpacity style={styles.googleBtn} onPress={handleGoogleLogin} disabled={isProcessing}>
+            {isProcessing ? <ActivityIndicator color="#090D16" /> : (
+              <>
+                <FontAwesome5 name="google" size={18} color="#090D16" style={{ marginRight: 10 }} />
+                <Text style={styles.googleBtnText}>Continue with Gmail</Text>
+              </>
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.guestBtn} onPress={handleGuestLogin}>
-            <Text style={styles.guestBtnText}>Continue as Guest</Text>
+            <Text style={styles.guestBtnText}>Skip as Guest</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {step === 'OTP' && (
+      {step === 'ONBOARDING' && (
         <View style={styles.card}>
-          <Text style={styles.label}>Enter 6-Digit Code</Text>
-          <Text style={styles.helperText}>Sent to +91 {identifier}</Text>
-          <TextInput style={[styles.input, { textAlign: 'center', fontSize: 24, letterSpacing: 8 }]} keyboardType="number-pad" maxLength={6} value={userOtp} onChangeText={setUserOtp} />
+          <Text style={styles.onboardTitle}>Complete Your Profile</Text>
           
-          <TouchableOpacity style={styles.btn} onPress={handleVerifyOtp} disabled={isProcessing}>
-            {isProcessing ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Verify Identity</Text>}
-          </TouchableOpacity>
+          <Text style={styles.label}>Your Name</Text>
+          <TextInput style={styles.input} placeholder="e.g. Gajanan" placeholderTextColor="#475569" value={name} onChangeText={setName} />
+          
+          <Text style={styles.label}>Mobile Number</Text>
+          <TextInput style={styles.input} keyboardType="number-pad" placeholder="10-digit number" placeholderTextColor="#475569" maxLength={10} value={phone} onChangeText={setPhone} />
+          
+          <Text style={styles.label}>Your Playing Role</Text>
+          <View style={styles.roleContainer}>
+            {roles.map((role) => (
+              <TouchableOpacity key={role} style={[styles.roleBtn, selectedRole === role && styles.roleBtnActive]} onPress={() => setSelectedRole(role)}>
+                <Text style={[styles.roleBtnText, selectedRole === role && styles.roleBtnTextActive]}>{role}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-          <TouchableOpacity style={[styles.resendBtn, timer > 0 && { opacity: 0.5 }]} onPress={handleProceed} disabled={timer > 0 || isProcessing}>
-            <Text style={styles.resendBtnText}>{timer > 0 ? `Resend Code in ${timer}s` : 'Resend Code Now'}</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {step === 'ADMIN' && (
-        <View style={[styles.card, { borderColor: '#EF4444' }]}>
-          <Text style={[styles.label, { color: '#EF4444' }]}>God Mode Gateway</Text>
-          <TextInput style={[styles.input, { textAlign: 'center' }]} secureTextEntry placeholder="Enter Master Passkey" placeholderTextColor="#475569" value={adminPass} onChangeText={setAdminPass} />
-          <TouchableOpacity style={[styles.btn, { backgroundColor: '#EF4444' }]} onPress={() => {
-            if (adminPass === '@1681Admin') onAdminUnlock();
-            else { Alert.alert('Access Denied', 'Intruder logged.'); setStep('INPUT'); }
-          }}>
-            <Text style={styles.btnText}>Initialize System</Text>
+          <TouchableOpacity style={styles.btn} onPress={handleCompleteProfile} disabled={isProcessing}>
+            {isProcessing ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Enter the League</Text>}
           </TouchableOpacity>
         </View>
       )}
@@ -144,15 +139,20 @@ export default function LoginScreen({ onLoginSuccess, onRequireProfile, onAdminU
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#090D16', justifyContent: 'center', alignItems: 'center', padding: 24 },
   title: { fontSize: 24, fontWeight: '800', color: '#F8FAFC', marginBottom: 4 },
-  subtitle: { fontSize: 13, color: '#94A3B8', marginBottom: 35 },
+  subtitle: { fontSize: 13, color: '#94A3B8' },
   card: { width: '100%', backgroundColor: '#131C2E', padding: 24, borderRadius: 20, borderWidth: 1, borderColor: '#1E293B', elevation: 10 },
+  onboardTitle: { fontSize: 20, color: '#fff', fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
   label: { color: '#94A3B8', marginBottom: 8, fontWeight: '700', fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
-  helperText: { color: '#64748B', fontSize: 12, marginBottom: 15 },
   input: { backgroundColor: '#090D16', color: '#fff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#1E293B', marginBottom: 20, fontSize: 16 },
+  roleContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 25 },
+  roleBtn: { width: '48%', backgroundColor: '#090D16', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#1E293B', marginBottom: 10, alignItems: 'center' },
+  roleBtnActive: { backgroundColor: '#38BDF8', borderColor: '#38BDF8' },
+  roleBtnText: { color: '#94A3B8', fontWeight: '600', fontSize: 14 },
+  roleBtnTextActive: { color: '#090D16', fontWeight: 'bold' },
   btn: { backgroundColor: '#0284C7', padding: 16, borderRadius: 12, alignItems: 'center' },
   btnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  googleBtn: { backgroundColor: '#fff', padding: 16, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  googleBtnText: { color: '#090D16', fontWeight: 'bold', fontSize: 16 },
   guestBtn: { marginTop: 20, alignItems: 'center', padding: 10 },
-  guestBtnText: { color: '#38BDF8', fontWeight: '600', fontSize: 14 },
-  resendBtn: { marginTop: 20, alignItems: 'center' },
-  resendBtnText: { color: '#94A3B8', fontWeight: '600', fontSize: 14 }
+  guestBtnText: { color: '#38BDF8', fontWeight: '600', fontSize: 14 }
 });

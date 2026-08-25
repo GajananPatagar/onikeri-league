@@ -5,9 +5,6 @@ import { MaterialCommunityIcons, Ionicons, FontAwesome5 } from '@expo/vector-ico
 export default function DashboardScreen({ user, onLogout }: any) {
   const [activeView, setActiveView] = useState<'HOME' | 'BOOK_TURF' | 'SQUAD' | 'ADMIN_USERS' | 'ADMIN_MATCHES' | 'ADMIN_FINANCE' | 'OVERRIDE' | 'LEAGUE'>('HOME');
 
-  // --------------------------------------------------------
-  // LIVE APP DATA STATE (Makes everything functional!)
-  // --------------------------------------------------------
   const [wallet, setWallet] = useState(user?.walletBalance || 0);
   const [revenue, setRevenue] = useState(45200);
   const [matchScore, setMatchScore] = useState({ runs: '145', wickets: '3', overs: '15.2', teamA: 'Onikeri Kings', teamB: 'Hubli Strikers' });
@@ -21,11 +18,8 @@ export default function DashboardScreen({ user, onLogout }: any) {
     { id: 3, name: 'Vikram (Spin)', status: 'Banned', role: 'All-Rounder' }
   ]);
 
-  // --------------------------------------------------------
-  // FUNCTIONAL ACTIONS
-  // --------------------------------------------------------
   const handleGuestBlock = () => {
-    Alert.alert('Verification Required', 'You must log in with a verified mobile number to use this feature.', [
+    Alert.alert('Verification Required', 'You must log in to use this feature.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Verify Now', onPress: onLogout }
     ]);
@@ -57,9 +51,6 @@ export default function DashboardScreen({ user, onLogout }: any) {
     Alert.alert('Score Updated', 'The Live League has been updated globally!');
   };
 
-  // --------------------------------------------------------
-  // INTERNAL WINDOW RENDERERS
-  // --------------------------------------------------------
   const renderHeader = (title: string) => (
     <View style={styles.subHeader}>
       <TouchableOpacity onPress={() => setActiveView('HOME')} style={styles.backBtn}>
@@ -116,16 +107,12 @@ export default function DashboardScreen({ user, onLogout }: any) {
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>{matchScore.teamA} vs {matchScore.teamB}</Text>
-          
           <Text style={styles.label}>Runs</Text>
           <TextInput style={styles.scoreInput} placeholder={matchScore.runs} placeholderTextColor="#475569" keyboardType="number-pad" value={runsInput} onChangeText={setRunsInput} />
-          
           <Text style={styles.label}>Wickets</Text>
           <TextInput style={styles.scoreInput} placeholder={matchScore.wickets} placeholderTextColor="#475569" keyboardType="number-pad" value={wicketsInput} onChangeText={setWicketsInput} />
-          
           <Text style={styles.label}>Overs</Text>
           <TextInput style={styles.scoreInput} placeholder={matchScore.overs} placeholderTextColor="#475569" keyboardType="numeric" value={oversInput} onChangeText={setOversInput} />
-          
           <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#10B981', marginTop: 20}]} onPress={handleUpdateScore}>
             <Text style={styles.actionBtnText}>Update Live Scoreboard</Text>
           </TouchableOpacity>
@@ -168,15 +155,17 @@ export default function DashboardScreen({ user, onLogout }: any) {
     </View>
   );
 
-  // --------------------------------------------------------
-  // MAIN DASHBOARD HOME
-  // --------------------------------------------------------
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>Welcome back,</Text>
           <Text style={styles.userName}>{user?.fullName || 'Player'}</Text>
+          {user?.playingRole && (
+            <Text style={{color: '#38BDF8', fontSize: 12, fontWeight: 'bold', marginTop: 4, textTransform: 'uppercase'}}>
+               🏏 {user.playingRole}
+            </Text>
+          )}
         </View>
         <TouchableOpacity onPress={onLogout} style={styles.logoutBtn}>
           <Ionicons name="log-out-outline" size={24} color="#EF4444" />
@@ -184,19 +173,19 @@ export default function DashboardScreen({ user, onLogout }: any) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={[styles.statusCard, user?.role === 'SuperAdmin' ? styles.adminCard : user?.role === 'Guest' ? styles.guestCard : {}]}>
+        <View style={[styles.statusCard, user?.appRole === 'SuperAdmin' ? styles.adminCard : user?.appRole === 'Guest' ? styles.guestCard : {}]}>
           <Text style={styles.statusTitle}>
-            {user?.role === 'SuperAdmin' ? 'God Mode Active' : user?.role === 'Guest' ? 'Guest Access Mode' : 'Verified Player Account'}
+            {user?.appRole === 'SuperAdmin' ? 'God Mode Active' : user?.appRole === 'Guest' ? 'Guest Access Mode' : 'Verified Player Account'}
           </Text>
           <Text style={styles.statusDesc}>
-            {user?.role === 'SuperAdmin' 
+            {user?.appRole === 'SuperAdmin' 
               ? 'You have unrestricted access. You can edit any user data, alter match scores, override turf bookings, and manage league financials.' 
-              : user?.role === 'Guest' 
-              ? 'You are browsing anonymously. Most features are locked until you verify your mobile number.'
+              : user?.appRole === 'Guest' 
+              ? 'You are browsing anonymously. Most features are locked until you verify your profile.'
               : `Wallet Balance: ₹${wallet}. You can now book turfs and join squads.`}
           </Text>
           
-          {user?.role !== 'Guest' && user?.role !== 'SuperAdmin' && (
+          {user?.appRole !== 'Guest' && user?.appRole !== 'SuperAdmin' && (
              <TouchableOpacity style={styles.payBtn} onPress={() => handleRazorpay(500, 'Wallet Top-up')}>
                <Text style={styles.payBtnText}>+ Add Funds (Razorpay)</Text>
              </TouchableOpacity>
@@ -206,23 +195,23 @@ export default function DashboardScreen({ user, onLogout }: any) {
         <Text style={styles.sectionTitle}>Dashboard Actions</Text>
         
         <View style={styles.grid}>
-          {user?.role !== 'SuperAdmin' && (
+          {user?.appRole !== 'SuperAdmin' && (
             <>
-              <TouchableOpacity style={styles.gridItem} onPress={user?.role === 'Guest' ? handleGuestBlock : () => setActiveView('BOOK_TURF')}>
-                <MaterialCommunityIcons name="stadium" size={32} color={user?.role === 'Guest' ? '#475569' : '#38BDF8'} />
+              <TouchableOpacity style={styles.gridItem} onPress={user?.appRole === 'Guest' ? handleGuestBlock : () => setActiveView('BOOK_TURF')}>
+                <MaterialCommunityIcons name="stadium" size={32} color={user?.appRole === 'Guest' ? '#475569' : '#38BDF8'} />
                 <Text style={styles.gridText}>Book Turf</Text>
-                {user?.role === 'Guest' && <FontAwesome5 name="lock" size={12} color="#EF4444" style={styles.lockIcon} />}
+                {user?.appRole === 'Guest' && <FontAwesome5 name="lock" size={12} color="#EF4444" style={styles.lockIcon} />}
               </TouchableOpacity>
               
-              <TouchableOpacity style={styles.gridItem} onPress={user?.role === 'Guest' ? handleGuestBlock : () => setActiveView('SQUAD')}>
-                <MaterialCommunityIcons name="account-group" size={32} color={user?.role === 'Guest' ? '#475569' : '#10B981'} />
+              <TouchableOpacity style={styles.gridItem} onPress={user?.appRole === 'Guest' ? handleGuestBlock : () => setActiveView('SQUAD')}>
+                <MaterialCommunityIcons name="account-group" size={32} color={user?.appRole === 'Guest' ? '#475569' : '#10B981'} />
                 <Text style={styles.gridText}>My Squad</Text>
-                {user?.role === 'Guest' && <FontAwesome5 name="lock" size={12} color="#EF4444" style={styles.lockIcon} />}
+                {user?.appRole === 'Guest' && <FontAwesome5 name="lock" size={12} color="#EF4444" style={styles.lockIcon} />}
               </TouchableOpacity>
             </>
           )}
 
-          {user?.role === 'SuperAdmin' && (
+          {user?.appRole === 'SuperAdmin' && (
             <>
               <TouchableOpacity style={styles.gridItem} onPress={() => setActiveView('ADMIN_USERS')}>
                 <MaterialCommunityIcons name="account-edit" size={32} color="#F59E0B" />
@@ -243,7 +232,7 @@ export default function DashboardScreen({ user, onLogout }: any) {
             </>
           )}
 
-          <TouchableOpacity style={[styles.gridItem, user?.role === 'SuperAdmin' ? {width: '100%'} : {}]} onPress={() => setActiveView('LEAGUE')}>
+          <TouchableOpacity style={[styles.gridItem, user?.appRole === 'SuperAdmin' ? {width: '100%'} : {}]} onPress={() => setActiveView('LEAGUE')}>
             <MaterialCommunityIcons name="trophy" size={32} color="#F59E0B" />
             <Text style={styles.gridText}>Live League</Text>
           </TouchableOpacity>
@@ -279,8 +268,6 @@ const styles = StyleSheet.create({
   lockIcon: { position: 'absolute', top: 10, right: 10 },
   actionBtn: { backgroundColor: '#0284C7', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 10 },
   actionBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  timeSlot: { backgroundColor: '#090D16', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#1E293B' },
-  timeText: { color: '#38BDF8', fontWeight: 'bold' },
   listItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderColor: '#1E293B' },
   editBtn: { backgroundColor: '#EF4444', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
   label: { color: '#94A3B8', marginBottom: 8, fontWeight: '700', fontSize: 12, marginTop: 10 },
