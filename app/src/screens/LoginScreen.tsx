@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { MaterialCommunityIcons, FontAwesome5 } from '@expo/vector-icons';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
-import auth from '@react-native-firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithCredential } from 'firebase/auth'; // <-- CHANGED TO WEB SDK
+import { db, app } from '../config/firebase'; // <-- EXPORTING APP FROM YOUR CONFIG
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
-// REPLACE THIS WITH YOUR FIREBASE WEB CLIENT ID
+// YOUR EXACT WEB CLIENT ID
 GoogleSignin.configure({
   webClientId: '6768887688-64tkpv9ufs4ub13hni1fk3jcup67osgj.apps.googleusercontent.com',
 });
@@ -27,18 +27,28 @@ export default function LoginScreen({ onLoginSuccess }: any) {
   const handleGoogleLogin = async () => {
     setIsProcessing(true);
     try {
+      // 1. Trigger the Native Google Popup
       await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
-      const { idToken } = await GoogleSignin.signIn();
-      const googleCredential = auth.GoogleAuthProvider.credential(idToken);
-      const userCredential = await auth().signInWithCredential(googleCredential);
+      const userInfo = await GoogleSignin.signIn();
+      
+      // Safely extract the ID token
+      const idToken = userInfo.idToken || (userInfo as any).data?.idToken;
+      if (!idToken) throw new Error("Google Sign-In failed to return an ID token.");
+
+      // 2. Connect to Firebase using the Web SDK
+      const auth = getAuth(app);
+      const credential = GoogleAuthProvider.credential(idToken);
+      const userCredential = await signInWithCredential(auth, credential);
       const user = userCredential.user;
 
+      // 3. Check if user already exists in your Firestore Database
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       
-      if (userDoc.exists() && userDoc.data()?.role) {
+      if (userDoc.exists() && userDoc.data()?.playingRole) {
         setIsProcessing(false);
-        onLoginSuccess(userDoc.data());
+        onLoginSuccess(userDoc.data()); // Returning User -> Go to Dashboard
       } else {
+        // New User -> Go to Onboarding
         setTempUid(user.uid);
         setTempEmail(user.email || '');
         setName(user.displayName || '');
@@ -48,7 +58,11 @@ export default function LoginScreen({ onLoginSuccess }: any) {
     } catch (error: any) {
       setIsProcessing(false);
       console.log(error);
-      Alert.alert('Login Failed', error.message || 'Could not connect to Google.');
+      // Make error message cleaner for users
+      const errorMsg = error.message.includes('DEVELOPER_ERROR') 
+        ? 'Configuration error. Ensure SHA-1 is added to Firebase.' 
+        : error.message;
+      Alert.alert('Login Failed', errorMsg);
     }
   };
 
