@@ -12,7 +12,20 @@
           "package_name": "com.onikeri.league"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "6768887688-arhmv2n1vpmq7l6spjkbfomlrcr2at46.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.onikeri.league",
+            "certificate_hash": "c104e13cbac680695b5846975dc3c26d3f19e9ec"
+          }
+        },
+        {
+          "client_id": "6768887688-64tkpv9ufs4ub13hni1fk3jcup67osgj.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyApQMT3mKXhUTmr3GrZjG1U7tSbP8hMRsQ"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "6768887688-64tkpv9ufs4ub13hni1fk3jcup67osgj.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
