@@ -1,156 +1,130 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, TextInput } from 'react-native';
-import { MaterialCommunityIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import RazorpayCheckout from 'react-native-razorpay';
+import { ref, onValue, set } from 'firebase/database';
+import { doc, updateDoc } from 'firebase/firestore';
+import { rtdb, db } from '../config/firebase';
 
 export default function DashboardScreen({ user, onLogout }: any) {
-  const [activeView, setActiveView] = useState<'HOME' | 'BOOK_TURF' | 'SQUAD' | 'ADMIN_USERS' | 'ADMIN_MATCHES' | 'ADMIN_FINANCE' | 'OVERRIDE' | 'LEAGUE'>('HOME');
-
-  const [wallet, setWallet] = useState(user?.walletBalance || 0);
-  const [revenue, setRevenue] = useState(45200);
-  const [matchScore, setMatchScore] = useState({ runs: '145', wickets: '3', overs: '15.2', teamA: 'Onikeri Kings', teamB: 'Hubli Strikers' });
-  const [runsInput, setRunsInput] = useState('');
-  const [wicketsInput, setWicketsInput] = useState('');
-  const [oversInput, setOversInput] = useState('');
+  const [activeView, setActiveView] = useState<'HOME' | 'BOOK_BOX' | 'CREATE_MATCH' | 'LEAGUE'>('HOME');
   
-  const [players, setPlayers] = useState([
-    { id: 1, name: 'Gajanan (Captain)', status: 'Active', role: 'Batsman' },
-    { id: 2, name: 'Rahul (Pace)', status: 'Active', role: 'Bowler' },
-    { id: 3, name: 'Vikram (Spin)', status: 'Banned', role: 'All-Rounder' }
-  ]);
+  // Real Data States
+  const [wallet, setWallet] = useState(user?.walletBalance || 0);
+  const [liveMatch, setLiveMatch] = useState<any>(null);
+  const [weather, setWeather] = useState({ temp: '--', condition: 'Loading...', icon: 'weather-cloudy' });
 
-  const handleGuestBlock = () => {
-    Alert.alert('Verification Required', 'You must log in to use this feature.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Verify Now', onPress: onLogout }
-    ]);
+  // Admin Match Inputs
+  const [teamA, setTeamA] = useState('Onikeri Kings');
+  const [teamB, setTeamB] = useState('Idagundi Strikers');
+
+  useEffect(() => {
+    // 1. Fetch Live Sirsi Weather
+    const fetchWeather = async () => {
+      try {
+        const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=Sirsi,IN&units=metric&appid=2cee5f64dc55e5ed47cb39251fe97182`);
+        const data = await res.json();
+        setWeather({ 
+          temp: Math.round(data.main.temp) + '°C', 
+          condition: data.weather[0].main,
+          icon: data.weather[0].main.toLowerCase().includes('rain') ? 'weather-pouring' : 'weather-partly-cloudy' 
+        });
+      } catch (e) { console.log("Weather error", e); }
+    };
+    fetchWeather();
+
+    // 2. Listen to Firebase RTDB for Live Scores
+    const matchRef = ref(rtdb, 'liveMatch');
+    const unsubscribe = onValue(matchRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setLiveMatch(snapshot.val());
+      } else {
+        setLiveMatch(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleAddFunds = () => {
+    const options = {
+      description: 'Add Wallet Funds',
+      image: 'https://cdn-icons-png.flaticon.com/512/8615/8615194.png',
+      currency: 'INR',
+      key: 'rzp_test_TU3nY0LM3usauA',
+      amount: 50000, // Amount in paise (₹500.00)
+      name: 'Onikeri Premier League',
+      prefill: { email: user?.email || '', contact: user?.mobileNumber || '', name: user?.fullName || '' },
+      theme: { color: '#0284C7' }
+    };
+
+    RazorpayCheckout.open(options).then(async (data: any) => {
+      // Success: Update Firestore Wallet
+      const newBalance = wallet + 500;
+      await updateDoc(doc(db, 'users', user.uid), { walletBalance: newBalance });
+      setWallet(newBalance);
+      Alert.alert('Success', `₹500 added! Payment ID: ${data.razorpay_payment_id}`);
+    }).catch((error: any) => {
+      Alert.alert('Payment Failed', `Code: ${error.code} | ${error.description}`);
+    });
   };
 
-  const handleRazorpay = (amount: number, reason: string) => {
-    Alert.alert('Razorpay Gateway', `Processing ₹${amount} for ${reason}.\n\n(Simulating Payment Success)`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Pay Now', onPress: () => {
-          setWallet((prev: number) => prev + amount);
-          setRevenue((prev: number) => prev + amount);
-          Alert.alert('Payment Successful', `₹${amount} has been added to your account!`);
-      }}
-    ]);
-  };
-
-  const togglePlayerBan = (id: number) => {
-    setPlayers(players.map(p => p.id === id ? { ...p, status: p.status === 'Active' ? 'Banned' : 'Active' } : p));
-  };
-
-  const handleUpdateScore = () => {
-    setMatchScore(prev => ({
-      ...prev,
-      runs: runsInput || prev.runs,
-      wickets: wicketsInput || prev.wickets,
-      overs: oversInput || prev.overs
-    }));
-    setRunsInput(''); setWicketsInput(''); setOversInput('');
-    Alert.alert('Score Updated', 'The Live League has been updated globally!');
+  const handleInitializeMatch = async () => {
+    await set(ref(rtdb, 'liveMatch'), {
+      teamA, teamB, runs: 0, wickets: 0, overs: '0.0', status: 'Live'
+    });
+    Alert.alert('Match Started', 'The league has been notified globally!');
+    setActiveView('LEAGUE');
   };
 
   const renderHeader = (title: string) => (
     <View style={styles.subHeader}>
-      <TouchableOpacity onPress={() => setActiveView('HOME')} style={styles.backBtn}>
-        <Ionicons name="arrow-back" size={24} color="#fff" />
-      </TouchableOpacity>
+      <TouchableOpacity onPress={() => setActiveView('HOME')} style={styles.backBtn}><Ionicons name="arrow-back" size={24} color="#fff" /></TouchableOpacity>
       <Text style={styles.subHeaderText}>{title}</Text>
       <View style={{ width: 24 }} />
     </View>
   );
 
-  if (activeView === 'BOOK_TURF') return (
+  // --- ADMIN VIEW: CREATE MATCH ---
+  if (activeView === 'CREATE_MATCH' && user?.appRole === 'SuperAdmin') return (
     <View style={styles.subView}>
-      {renderHeader('Book a Turf')}
+      {renderHeader('Create Live Match')}
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Select Turf</Text>
-          <TouchableOpacity style={[styles.gridItem, {width: '100%', borderColor: '#38BDF8'}]}>
-            <Text style={{color: '#fff', fontSize: 18, fontWeight: 'bold'}}>Main Stadium - Pitch A</Text>
-            <Text style={{color: '#94A3B8'}}>₹1,200 / match</Text>
-          </TouchableOpacity>
-        </View>
-        <TouchableOpacity style={styles.actionBtn} onPress={() => handleRazorpay(1200, 'Turf Booking')}>
-          <Text style={styles.actionBtnText}>Pay ₹1,200 via Razorpay</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </View>
-  );
-
-  if (activeView === 'ADMIN_USERS') return (
-    <View style={styles.subView}>
-      {renderHeader('Manage Users')}
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Registered Players</Text>
-          {players.map((p) => (
-            <View key={p.id} style={styles.listItem}>
-              <View>
-                <Text style={{color: p.status === 'Banned' ? '#64748B' : '#fff', fontSize: 16, textDecorationLine: p.status === 'Banned' ? 'line-through' : 'none'}}>{p.name}</Text>
-                <Text style={{color: p.status === 'Banned' ? '#EF4444' : '#10B981', fontSize: 12}}>{p.status}</Text>
-              </View>
-              <TouchableOpacity style={[styles.editBtn, p.status === 'Banned' && {backgroundColor: '#10B981'}]} onPress={() => togglePlayerBan(p.id)}>
-                <Text style={{color: '#fff', fontSize: 12}}>{p.status === 'Banned' ? 'Unban' : 'Ban'}</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-        </View>
-      </ScrollView>
-    </View>
-  );
-
-  if (activeView === 'ADMIN_MATCHES') return (
-    <View style={styles.subView}>
-      {renderHeader('Live Match Editor')}
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>{matchScore.teamA} vs {matchScore.teamB}</Text>
-          <Text style={styles.label}>Runs</Text>
-          <TextInput style={styles.scoreInput} placeholder={matchScore.runs} placeholderTextColor="#475569" keyboardType="number-pad" value={runsInput} onChangeText={setRunsInput} />
-          <Text style={styles.label}>Wickets</Text>
-          <TextInput style={styles.scoreInput} placeholder={matchScore.wickets} placeholderTextColor="#475569" keyboardType="number-pad" value={wicketsInput} onChangeText={setWicketsInput} />
-          <Text style={styles.label}>Overs</Text>
-          <TextInput style={styles.scoreInput} placeholder={matchScore.overs} placeholderTextColor="#475569" keyboardType="numeric" value={oversInput} onChangeText={setOversInput} />
-          <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#10B981', marginTop: 20}]} onPress={handleUpdateScore}>
-            <Text style={styles.actionBtnText}>Update Live Scoreboard</Text>
+          <Text style={styles.label}>Team A Name</Text>
+          <TextInput style={styles.input} value={teamA} onChangeText={setTeamA} />
+          <Text style={styles.label}>Team B Name</Text>
+          <TextInput style={styles.input} value={teamB} onChangeText={setTeamB} />
+          <TouchableOpacity style={[styles.actionBtn, {backgroundColor: '#10B981'}]} onPress={handleInitializeMatch}>
+            <Text style={styles.actionBtnText}>Broadcast Match Live</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
     </View>
   );
 
-  if (activeView === 'ADMIN_FINANCE') return (
-    <View style={styles.subView}>
-      {renderHeader('Financial Dashboard')}
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={[styles.statusCard, {backgroundColor: '#10B981'}]}>
-          <Text style={styles.statusTitle}>Total League Revenue</Text>
-          <Text style={{color: '#fff', fontSize: 32, fontWeight: 'bold'}}>₹ {revenue.toLocaleString()}</Text>
-        </View>
-        <Text style={styles.sectionTitle}>Recent Razorpay Transactions</Text>
-        <View style={styles.card}>
-          <Text style={{color: '#38BDF8', marginBottom: 15, fontSize: 16}}>+ ₹1,200 (Turf Booking - Gajanan)</Text>
-          <Text style={{color: '#38BDF8', marginBottom: 15, fontSize: 16}}>+ ₹500 (Wallet Add - Rahul)</Text>
-          <Text style={{color: '#38BDF8', marginBottom: 15, fontSize: 16}}>+ ₹5,000 (Team Entry - Kings)</Text>
-        </View>
-      </ScrollView>
-    </View>
-  );
-
+  // --- EVERYONE: LIVE LEAGUE ---
   if (activeView === 'LEAGUE') return (
     <View style={styles.subView}>
       {renderHeader('Live Scoreboard')}
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.card}>
-          <Text style={{color: '#EF4444', fontWeight: 'bold', marginBottom: 10, letterSpacing: 2}}>🔴 LIVE NOW</Text>
-          <Text style={{color: '#fff', fontSize: 24, fontWeight: 'bold'}}>{matchScore.teamA}</Text>
-          <Text style={{color: '#38BDF8', fontSize: 48, fontWeight: '900', marginVertical: 10}}>{matchScore.runs} / {matchScore.wickets}</Text>
-          <Text style={{color: '#94A3B8', fontSize: 18}}>Overs: {matchScore.overs}</Text>
-          <View style={{height: 1, backgroundColor: '#1E293B', marginVertical: 15}} />
-          <Text style={{color: '#fff', fontSize: 16}}>{matchScore.teamB} yet to bat</Text>
-        </View>
+        {liveMatch ? (
+          <View style={styles.card}>
+            <Text style={{color: '#EF4444', fontWeight: 'bold', marginBottom: 10, letterSpacing: 2}}>🔴 LIVE: {weather.temp} in Sirsi</Text>
+            <Text style={{color: '#fff', fontSize: 24, fontWeight: 'bold'}}>{liveMatch.teamA} vs {liveMatch.teamB}</Text>
+            <Text style={{color: '#38BDF8', fontSize: 48, fontWeight: '900', marginVertical: 10}}>{liveMatch.runs} / {liveMatch.wickets}</Text>
+            <Text style={{color: '#94A3B8', fontSize: 18}}>Overs: {liveMatch.overs}</Text>
+            {user?.appRole === 'SuperAdmin' && (
+               <TouchableOpacity style={[styles.actionBtn, {marginTop: 20}]} onPress={() => Alert.alert('Score Editor', 'Next step: build the score increment buttons!')}>
+                 <Text style={styles.actionBtnText}>Edit Score (Admin Only)</Text>
+               </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          <View style={[styles.card, {alignItems: 'center', paddingVertical: 40}]}>
+             <MaterialCommunityIcons name="cricket" size={48} color="#475569" style={{marginBottom: 10}} />
+             <Text style={{color: '#94A3B8', fontSize: 16}}>No Live Matches Currently</Text>
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -161,11 +135,6 @@ export default function DashboardScreen({ user, onLogout }: any) {
         <View>
           <Text style={styles.greeting}>Welcome back,</Text>
           <Text style={styles.userName}>{user?.fullName || 'Player'}</Text>
-          {user?.playingRole && (
-            <Text style={{color: '#38BDF8', fontSize: 12, fontWeight: 'bold', marginTop: 4, textTransform: 'uppercase'}}>
-               🏏 {user.playingRole}
-            </Text>
-          )}
         </View>
         <TouchableOpacity onPress={onLogout} style={styles.logoutBtn}>
           <Ionicons name="log-out-outline" size={24} color="#EF4444" />
@@ -173,68 +142,65 @@ export default function DashboardScreen({ user, onLogout }: any) {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={[styles.statusCard, user?.appRole === 'SuperAdmin' ? styles.adminCard : user?.appRole === 'Guest' ? styles.guestCard : {}]}>
+        
+        {/* SIRSI WEATHER WIDGET */}
+        <View style={styles.weatherCard}>
+          <View style={{flexDirection: 'row', alignItems: 'center'}}>
+            <MaterialCommunityIcons name={weather.icon as any} size={36} color="#38BDF8" />
+            <View style={{marginLeft: 15}}>
+              <Text style={{color: '#fff', fontSize: 16, fontWeight: 'bold'}}>Sirsi, Karnataka</Text>
+              <Text style={{color: '#E0F2FE', fontSize: 14}}>{weather.temp} - {weather.condition}</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={[styles.statusCard, user?.appRole === 'SuperAdmin' ? styles.adminCard : {}]}>
           <Text style={styles.statusTitle}>
-            {user?.appRole === 'SuperAdmin' ? 'God Mode Active' : user?.appRole === 'Guest' ? 'Guest Access Mode' : 'Verified Player Account'}
+            {user?.appRole === 'SuperAdmin' ? 'Admin Dashboard' : 'Player Account'}
           </Text>
           <Text style={styles.statusDesc}>
             {user?.appRole === 'SuperAdmin' 
-              ? 'You have unrestricted access. You can edit any user data, alter match scores, override turf bookings, and manage league financials.' 
-              : user?.appRole === 'Guest' 
-              ? 'You are browsing anonymously. Most features are locked until you verify your profile.'
-              : `Wallet Balance: ₹${wallet}. You can now book turfs and join squads.`}
+              ? 'You have full access to create matches, manage Box Cricket bookings, and oversee the league.' 
+              : `Wallet Balance: ₹${wallet}.`}
           </Text>
           
-          {user?.appRole !== 'Guest' && user?.appRole !== 'SuperAdmin' && (
-             <TouchableOpacity style={styles.payBtn} onPress={() => handleRazorpay(500, 'Wallet Top-up')}>
-               <Text style={styles.payBtnText}>+ Add Funds (Razorpay)</Text>
+          {user?.appRole !== 'Guest' && (
+             <TouchableOpacity style={styles.payBtn} onPress={handleAddFunds}>
+               <Text style={styles.payBtnText}>+ Add ₹500 (Razorpay Test)</Text>
              </TouchableOpacity>
           )}
         </View>
-
-        <Text style={styles.sectionTitle}>Dashboard Actions</Text>
         
         <View style={styles.grid}>
           {user?.appRole !== 'SuperAdmin' && (
             <>
-              <TouchableOpacity style={styles.gridItem} onPress={user?.appRole === 'Guest' ? handleGuestBlock : () => setActiveView('BOOK_TURF')}>
-                <MaterialCommunityIcons name="stadium" size={32} color={user?.appRole === 'Guest' ? '#475569' : '#38BDF8'} />
-                <Text style={styles.gridText}>Book Turf</Text>
-                {user?.appRole === 'Guest' && <FontAwesome5 name="lock" size={12} color="#EF4444" style={styles.lockIcon} />}
+              <TouchableOpacity style={styles.gridItem} onPress={() => setActiveView('BOOK_BOX')}>
+                <MaterialCommunityIcons name="stadium-variant" size={32} color="#38BDF8" />
+                <Text style={styles.gridText}>Box Cricket</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity style={styles.gridItem} onPress={user?.appRole === 'Guest' ? handleGuestBlock : () => setActiveView('SQUAD')}>
-                <MaterialCommunityIcons name="account-group" size={32} color={user?.appRole === 'Guest' ? '#475569' : '#10B981'} />
+              <TouchableOpacity style={styles.gridItem}>
+                <MaterialCommunityIcons name="account-group" size={32} color="#10B981" />
                 <Text style={styles.gridText}>My Squad</Text>
-                {user?.appRole === 'Guest' && <FontAwesome5 name="lock" size={12} color="#EF4444" style={styles.lockIcon} />}
               </TouchableOpacity>
             </>
           )}
 
           {user?.appRole === 'SuperAdmin' && (
             <>
-              <TouchableOpacity style={styles.gridItem} onPress={() => setActiveView('ADMIN_USERS')}>
-                <MaterialCommunityIcons name="account-edit" size={32} color="#F59E0B" />
-                <Text style={styles.gridText}>Manage Users</Text>
+              <TouchableOpacity style={styles.gridItem} onPress={() => setActiveView('CREATE_MATCH')}>
+                <MaterialCommunityIcons name="calendar-edit" size={32} color="#F59E0B" />
+                <Text style={styles.gridText}>Create Match</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.gridItem} onPress={() => setActiveView('ADMIN_MATCHES')}>
-                <MaterialCommunityIcons name="calendar-edit" size={32} color="#38BDF8" />
-                <Text style={styles.gridText}>Edit Matches</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.gridItem} onPress={() => setActiveView('ADMIN_FINANCE')}>
-                <MaterialCommunityIcons name="bank-transfer" size={32} color="#10B981" />
-                <Text style={styles.gridText}>Financials</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.gridItem} onPress={() => Alert.alert('Override Active', 'System settings overridden.')}>
-                <MaterialCommunityIcons name="shield-alert" size={32} color="#EF4444" />
-                <Text style={styles.gridText}>System Override</Text>
+              <TouchableOpacity style={styles.gridItem} onPress={() => setActiveView('BOOK_BOX')}>
+                <MaterialCommunityIcons name="stadium-variant" size={32} color="#38BDF8" />
+                <Text style={styles.gridText}>Manage Box Cricket</Text>
               </TouchableOpacity>
             </>
           )}
 
-          <TouchableOpacity style={[styles.gridItem, user?.appRole === 'SuperAdmin' ? {width: '100%'} : {}]} onPress={() => setActiveView('LEAGUE')}>
+          <TouchableOpacity style={[styles.gridItem, {width: '100%'}]} onPress={() => setActiveView('LEAGUE')}>
             <MaterialCommunityIcons name="trophy" size={32} color="#F59E0B" />
-            <Text style={styles.gridText}>Live League</Text>
+            <Text style={styles.gridText}>Live Scoreboard</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -254,22 +220,18 @@ const styles = StyleSheet.create({
   logoutBtn: { padding: 8, backgroundColor: '#090D16', borderRadius: 8, borderWidth: 1, borderColor: '#1E293B' },
   scrollContent: { padding: 24 },
   card: { backgroundColor: '#131C2E', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#1E293B', marginBottom: 20 },
+  weatherCard: { backgroundColor: '#131C2E', padding: 15, borderRadius: 12, marginBottom: 20, borderWidth: 1, borderColor: '#1E293B' },
   statusCard: { backgroundColor: '#0284C7', padding: 20, borderRadius: 16, marginBottom: 30 },
   adminCard: { backgroundColor: '#EF4444' },
-  guestCard: { backgroundColor: '#1E293B', borderWidth: 1, borderColor: '#334155' },
   statusTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
   statusDesc: { color: '#E0F2FE', fontSize: 14, lineHeight: 22 },
   payBtn: { marginTop: 15, backgroundColor: '#fff', padding: 10, borderRadius: 8, alignItems: 'center' },
   payBtnText: { color: '#0284C7', fontWeight: 'bold' },
-  sectionTitle: { color: '#F8FAFC', fontSize: 18, fontWeight: 'bold', marginBottom: 15 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 15, justifyContent: 'space-between' },
-  gridItem: { width: '47%', backgroundColor: '#131C2E', padding: 20, borderRadius: 16, alignItems: 'center', borderWidth: 1, borderColor: '#1E293B', marginBottom: 15, position: 'relative' },
-  gridText: { color: '#94A3B8', marginTop: 10, fontWeight: '600' },
-  lockIcon: { position: 'absolute', top: 10, right: 10 },
-  actionBtn: { backgroundColor: '#0284C7', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 10 },
-  actionBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  listItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderColor: '#1E293B' },
-  editBtn: { backgroundColor: '#EF4444', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
   label: { color: '#94A3B8', marginBottom: 8, fontWeight: '700', fontSize: 12, marginTop: 10 },
-  scoreInput: { backgroundColor: '#090D16', color: '#fff', fontSize: 18, padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#1E293B' }
+  input: { backgroundColor: '#090D16', color: '#fff', fontSize: 16, padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#1E293B' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 15, justifyContent: 'space-between' },
+  gridItem: { width: '47%', backgroundColor: '#131C2E', padding: 20, borderRadius: 16, alignItems: 'center', borderWidth: 1, borderColor: '#1E293B', marginBottom: 15 },
+  gridText: { color: '#94A3B8', marginTop: 10, fontWeight: '600' },
+  actionBtn: { backgroundColor: '#0284C7', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 10 },
+  actionBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 }
 });
