@@ -1,24 +1,29 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getAuth } from 'firebase/auth';
 import { initializeFirestore } from 'firebase/firestore';
-import { getDatabase } from 'firebase/database'; // <-- NEW RTDB IMPORT
+import { getDatabase } from 'firebase/database'; // <-- ADDED: RTDB Import
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCXNA7JDiqR6q42sWDHmtC47_5Pn-YVgmo",
+  apiKey: "AIzaSyApQMT3mKXhUTmr3GrZjG1U7tSbP8hMRsQ",
   authDomain: "onikeri-premier-league.firebaseapp.com",
-  databaseURL: "https://onikeri-premier-league-default-rtdb.firebaseio.com", // <-- ADDED RTDB URL
+  databaseURL: "https://onikeri-premier-league-default-rtdb.firebaseio.com", // <-- ADDED: RTDB URL
   projectId: "onikeri-premier-league",
   storageBucket: "onikeri-premier-league.firebasestorage.app",
   messagingSenderId: "6768887688",
-  appId: "1:6768887688:web:4798f5f2ee2aa41fc4dc3d",
-  measurementId: "G-K0CZSSKS1F"
+  appId: "1:6768887688:android:90f7f09cec8bf5c7c4dc3d",
 };
 
+// Safe initialization (prevents app crashes on reload)
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+const auth = getAuth(app);
 
-// Firestore (For saving User Profiles & Wallets)
-const db = initializeFirestore(app, { experimentalForceLongPolling: true });
+// PRO FIX: Forces polling to bypass mobile network WebSockets bug
+const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+});
 
-// Realtime Database (For Live Match Scores with zero lag)
+// Initialize Realtime Database (for zero-latency live scores)
 const rtdb = getDatabase(app);
 
-export { db, rtdb, app };
+// Exporting rtdb so your Dashboard can use it!
+export { app, auth, db, rtdb };
