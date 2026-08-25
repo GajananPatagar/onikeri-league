@@ -8,7 +8,7 @@ import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 // REPLACE THIS WITH YOUR FIREBASE WEB CLIENT ID
 GoogleSignin.configure({
-  webClientId: 'YOUR_WEB_CLIENT_ID_FROM_FIREBASE.apps.googleusercontent.com',
+  webClientId: '6768887688-64tkpv9ufs4ub13hni1fk3jcup67osgj.apps.googleusercontent.com',
 });
 
 export default function LoginScreen({ onLoginSuccess }: any) {
