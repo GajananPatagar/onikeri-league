@@ -1,7 +1,8 @@
-import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { getFirestore } from 'firebase/firestore';
 
-export const firebaseConfig = {
+// Your exact Firebase project configuration
+const firebaseConfig = {
   apiKey: "AIzaSyCXNA7JDiqR6q42sWDHmtC47_5Pn-YVgmo",
   authDomain: "onikeri-premier-league.firebaseapp.com",
   projectId: "onikeri-premier-league",
@@ -11,5 +12,10 @@ export const firebaseConfig = {
   measurementId: "G-K0CZSSKS1F"
 };
 
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-export const auth = getAuth(app);
+// Initialize Firebase securely (prevents crashing if the app reloads)
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+
+// Initialize Firestore database
+const db = getFirestore(app);
+
+export { db, app };
