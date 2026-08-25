@@ -13,6 +13,7 @@
     "@react-native-community/datetimepicker": "8.4.4",
     "@react-native-firebase/app": "^26.3.2",
     "@react-native-firebase/auth": "^26.3.2",
+    "@react-native-google-signin/google-signin": "^16.1.4",
     "@react-navigation/native": "^7.1.8",
     "expo": "~54.0.36",
     "expo-build-properties": "~1.0.10",
